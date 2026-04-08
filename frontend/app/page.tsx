@@ -1,3 +1,12 @@
+/**
+ * MedSync dashboard page.
+ *
+ * Main responsibilities:
+ * - Upload and ingest medical reports
+ * - Show vault files and preview modal
+ * - Ask chat questions to backend assistant
+ * - Derive quick health widgets (medications/next visit)
+ */
 "use client";
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
@@ -9,6 +18,7 @@ interface ChatMessage {
 }
 
 export default function MedSync() {
+  // Core UI state for files, chat, and async actions.
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
   const [chat, setChat] = useState<ChatMessage[]>([]);
@@ -25,6 +35,7 @@ export default function MedSync() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
+    // Keeps latest message visible whenever chat updates.
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
@@ -33,6 +44,7 @@ export default function MedSync() {
   }, [chat, loading]);
 
   const fetchFiles = async () => {
+    // Pulls current vault list from backend for gallery + counters.
     try {
       const res = await fetch("http://127.0.0.1:8000/files");
       const data = await res.json();
@@ -43,6 +55,7 @@ export default function MedSync() {
   };
 
   const handlePurgeVault = async () => {
+    // Hard reset: clears uploaded files and vector DB.
     if (!confirm("⚠️ Are you sure? This will delete ALL reports and clear the database permanently.")) {
       return;
     }
@@ -66,6 +79,7 @@ export default function MedSync() {
   };
 
   const fetchHealthInsights = async () => {
+    // Asks assistant for structured summary used by dashboard widgets.
     if (files.length === 0) {
       setMedications([]);
       setNextVisit(null);
@@ -104,6 +118,7 @@ export default function MedSync() {
   useEffect(() => { fetchHealthInsights(); }, [files]);
 
   const handleUpload = async () => {
+    // Sends selected report file to ingestion endpoint.
     if (!file) return alert("Please select a file first!");
     setUploading(true);
     const formData = new FormData();
@@ -128,6 +143,7 @@ export default function MedSync() {
   };
 
   const handleChat = async () => {
+    // Sends user message and appends AI response to transcript.
     if (!question.trim()) return;
     setLoading(true);
     const userMsg: ChatMessage = { role: "user", text: question };
@@ -230,7 +246,7 @@ export default function MedSync() {
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Chat Co-pilot */}
+          {/* RIGHT COLUMN: Chat assistant transcript + input composer */}
           <div className="lg:col-span-7 bg-white rounded-[2.5rem] shadow-xl border border-slate-200 flex flex-col h-[750px] overflow-hidden">
             <div className="p-6 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
               <h2 className="font-bold text-slate-800 flex items-center gap-2"><span>🤖</span> AI Clinical Assistant</h2>

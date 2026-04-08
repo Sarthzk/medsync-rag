@@ -1,3 +1,7 @@
+/**
+ * Root layout for the Next.js frontend.
+ * Sets global fonts, metadata, and wraps every page route.
+ */
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -22,6 +26,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Shared app shell for all pages.
   return (
     <html lang="en">
       <body

@@ -1,6 +1,8 @@
+/* Global stylesheet for shared app theming and typography defaults. */
 @import "tailwindcss";
 
 :root {
+  /* Default light theme colors. */
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -14,12 +16,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* Automatic dark-mode palette fallback. */
     --background: #0a0a0a;
     --foreground: #ededed;
   }
 }
 
 body {
+  /* Base page styling inherited by all routes. */
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;

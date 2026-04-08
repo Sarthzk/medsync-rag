@@ -1,14 +1,31 @@
+"""FastAPI backend entrypoint for the MedSync application.
+
+Responsibilities:
+- Receives file uploads and delegates ingestion to the RAG pipeline.
+- Receives chat requests and delegates response generation.
+- Exposes helper endpoints for file listing and full vault clearing.
+"""
+
 import os
 import shutil
-import chromadb
-from fastapi import FastAPI, UploadFile, File, Form
+import logging
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
-# Ensure these files exist in your directory
-from ingest import process_medical_report
-from query import ask_medsync
+from medsync_rag import (
+    answer_question,
+    clear_all_data,
+    ingest_medical_report,
+    load_config,
+)
+
+logging.basicConfig(
+    level=(os.getenv("LOG_LEVEL", "INFO") or "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("medsync.api")
 
 app = FastAPI()
 
@@ -20,10 +37,6 @@ if not os.path.exists(UPLOAD_DIR):
 # Mount the uploads folder so the frontend can display images
 app.mount("/view-reports", StaticFiles(directory=UPLOAD_DIR), name="reports")
 
-# --- DATABASE SETUP ---
-chroma_client = chromadb.PersistentClient(path="./medsync_db")
-collection = chroma_client.get_or_create_collection(name="medical_reports")
-
 # --- CORS CONFIGURATION ---
 app.add_middleware(
     CORSMiddleware,
@@ -34,40 +47,54 @@ app.add_middleware(
 )
 
 class ChatRequest(BaseModel):
+    """Request payload schema for the chat endpoint."""
+
     question: str
 
 # --- ENDPOINTS ---
 
 @app.get("/")
 def read_root():
+    """Simple API health/status endpoint."""
     return {"status": "MedSync-RAG API is Online"}
 
 @app.post("/upload")
 async def upload_report(file: UploadFile = File(...)):
+    """Stores uploaded file and triggers report ingestion."""
+    if not file.filename:
+        return {"error": "Missing filename."}
+
+    allowed = (".png", ".jpg", ".jpeg", ".heic")
+    if not file.filename.lower().endswith(allowed):
+        return {"error": f"Unsupported file type. Allowed: {', '.join(allowed)}"}
+
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        result = process_medical_report(file_path)
+
+        cfg = load_config()
+        result = ingest_medical_report(cfg, file_path)
         return {"message": f"Successfully ingested {file.filename}", "details": result}
     except Exception as e:
-        print(f"❌ Upload Error: {e}")
+        logger.exception("Upload error")
         return {"error": str(e)}
 
 @app.post("/chat")
 async def chat_with_report(request: ChatRequest):
+    """Answers user questions via retrieval + conversational routing pipeline."""
     try:
-        print(f"📩 Received Question: {request.question}")
-        answer = ask_medsync(request.question)
-        print(f"🤖 AI Answer: {answer}")
+        logger.info("Received question")
+        cfg = load_config()
+        answer = answer_question(cfg, request.question, k=2)
         return {"answer": answer}
     except Exception as e:
-        print(f"❌ Chat Error: {e}")
+        logger.exception("Chat error")
         return {"error": str(e)}
 
 @app.get("/files")
 async def list_files():
+    """Returns the list of uploaded medical report filenames."""
     if not os.path.exists(UPLOAD_DIR):
         return {"files": []}
     files = os.listdir(UPLOAD_DIR)
@@ -77,14 +104,9 @@ async def list_files():
 
 @app.post("/clear_db")
 async def clear_database():
+    """Clears vector data and uploaded files for a full reset."""
     try:
-        ids = collection.get()['ids']
-        if ids:
-            collection.delete(ids=ids)
-        for filename in os.listdir(UPLOAD_DIR):
-            file_path = os.path.join(UPLOAD_DIR, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-        return {"message": "Clear successful"}
+        cfg = load_config()
+        return clear_all_data(cfg)
     except Exception as e:
         return {"error": str(e)}

@@ -87,3 +87,9 @@ watchfiles==1.1.1
 websocket-client==1.9.0
 websockets==15.0.1
 zipp==3.23.0
+
+# LangChain backend pipeline (kept unpinned for easier testing iteration)
+langchain-chroma
+langchain-core
+langchain-openai
+langchain-text-splitters

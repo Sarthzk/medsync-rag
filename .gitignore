@@ -7,6 +7,7 @@ __pycache__/
 # --- Database & Local Storage (CRITICAL) ---
 medsync_db/
 uploads/
+.medsync_cache/
 temp_*
 *.log
 

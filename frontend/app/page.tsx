@@ -12,16 +12,53 @@ import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 
 // --- TypeScript Interfaces ---
+interface FaithfulnessPayload {
+  confidence: number | null;
+  unsupported_claims: string[];
+  all_supported?: boolean;
+  notes?: string;
+  verification_failed?: boolean;
+}
+
 interface ChatMessage {
   role: "user" | "ai";
   text: string;
+  faithfulness?: FaithfulnessPayload | null;
 }
 
+interface HealthInsights {
+  medications: string[];
+  next_visit: string;
+}
+
+const extractJsonObject = (text: string): HealthInsights | null => {
+  const raw = (text || "").trim();
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as HealthInsights;
+  } catch {
+    // Try best-effort JSON extraction when model wraps JSON in prose/markdown.
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]) as HealthInsights;
+    } catch {
+      return null;
+    }
+  }
+};
+
 export default function MedSync() {
+  const greetingMessage: ChatMessage = {
+    role: "ai",
+    text: "Hi! I am MedSync AI. I can help you understand your uploaded reports and answer your health-report questions.",
+  };
+
   // Core UI state for files, chat, and async actions.
   const [file, setFile] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
-  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>([greetingMessage]);
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState<string[]>([]); 
   const [selectedFile, setSelectedFile] = useState<string | null>(null); 
@@ -65,7 +102,7 @@ export default function MedSync() {
       const data = await res.json();
       if (data.message) {
         alert("✅ Vault cleared successfully!");
-        setChat([]);
+        setChat([greetingMessage]);
         setFiles([]);
         setMedications([]);
         setNextVisit(null);
@@ -90,25 +127,39 @@ export default function MedSync() {
       const res = await fetch("http://127.0.0.1:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          question: "Extract all active medications and next doctor visit date from the reports. Format as: MEDICATIONS: [medication1, medication2] | NEXT VISIT: [date]. Be concise." 
+        body: JSON.stringify({
+          skip_faithfulness: true,
+          question:
+            'From uploaded reports only, return strict JSON with keys "medications" (array of strings) and "next_visit" (string). Use empty array / empty string if unknown. Return JSON only.',
         }),
       });
       const data = await res.json();
       const response = data.answer || "";
-      
-      const medMatch = response.match(/MEDICATIONS:\s*\[([^\]]+)\]/);
-      const visitMatch = response.match(/NEXT VISIT:\s*([^|]+)/);
-      
-      if (medMatch) {
-        const meds = medMatch[1].split(',').map((m: string) => m.trim()).filter((m: string) => m.length > 0);
-        setMedications(meds);
+
+      const parsed = extractJsonObject(response);
+      if (parsed) {
+        setMedications(
+          Array.isArray(parsed.medications)
+            ? parsed.medications.map((m) => String(m).trim()).filter(Boolean)
+            : []
+        );
+        setNextVisit((parsed.next_visit || "").trim() || null);
+        return;
       }
-      if (visitMatch) {
-        setNextVisit(visitMatch[1].trim());
-      }
+
+      // Backward-compatible fallback for older plain-text model responses.
+      const medMatch = response.match(/MEDICATIONS:\s*\[([^\]]+)\]/i);
+      const visitMatch = response.match(/NEXT VISIT:\s*([^|]+)/i);
+      setMedications(
+        medMatch
+          ? medMatch[1].split(",").map((m: string) => m.trim()).filter(Boolean)
+          : []
+      );
+      setNextVisit(visitMatch ? visitMatch[1].trim() : null);
     } catch (err) {
       console.error("Failed to fetch health insights", err);
+      setMedications([]);
+      setNextVisit(null);
     } finally {
       setLoadingHealth(false);
     }
@@ -134,6 +185,10 @@ export default function MedSync() {
         alert("Report Digitized!");
         setFile(null);
         fetchFiles();
+      } else if (data.error) {
+        alert(`Upload failed: ${data.error}`);
+      } else {
+        alert("Upload failed. Please try again.");
       }
     } catch (err) {
       alert("Server connection failed.");
@@ -143,23 +198,142 @@ export default function MedSync() {
   };
 
   const handleChat = async () => {
-    // Sends user message and appends AI response to transcript.
-    if (!question.trim()) return;
+    // Streams assistant tokens from /chat/stream (SSE); keeps Ask disabled until complete.
+    const q = question.trim();
+    if (!q) return;
     setLoading(true);
-    const userMsg: ChatMessage = { role: "user", text: question };
-    setChat((prev) => [...prev, userMsg]);
+    const userMsg: ChatMessage = { role: "user", text: q };
+    setChat((prev) => [...prev, userMsg, { role: "ai", text: "" }]);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/chat", {
+      const res = await fetch("http://127.0.0.1:8000/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: q }),
       });
-      const data = await res.json();
-      const aiText = data.answer || data.error || "I'm sorry, I couldn't process that.";
-      setChat((prev) => [...prev, { role: "ai", text: aiText }]);
-    } catch (err) {
-      setChat((prev) => [...prev, { role: "ai", text: "Connection error. Is the backend running?" }]);
+
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => "");
+        setChat((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role === "ai") {
+            next[next.length - 1] = {
+              role: "ai",
+              text: errText || `Request failed (${res.status}).`,
+            };
+          }
+          return next;
+        });
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let carry = "";
+      let full = "";
+
+      const patchAi = (text: string, fc?: FaithfulnessPayload | null) => {
+        setChat((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role === "ai") {
+            next[next.length - 1] = {
+              ...last,
+              text,
+              ...(fc !== undefined ? { faithfulness: fc } : {}),
+            };
+          }
+          return next;
+        });
+      };
+
+      readLoop: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        carry += decoder.decode(value, { stream: true });
+        const lines = carry.split("\n");
+        carry = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (raw === "[DONE]") break readLoop;
+          try {
+            const j = JSON.parse(raw) as {
+              t?: string;
+              error?: string;
+              faithfulness?: FaithfulnessPayload;
+            };
+            if (j.error) {
+              full = `Sorry — ${j.error}`;
+              patchAi(full, null);
+              break readLoop;
+            }
+            if (j.faithfulness) {
+              patchAi(full, j.faithfulness);
+            }
+            if (j.t) {
+              full += j.t;
+              patchAi(full);
+            }
+          } catch {
+            /* ignore malformed SSE payload */
+          }
+        }
+      }
+
+      // If the stream ended without a trailing newline, flush the last `data:` line.
+      if (carry.startsWith("data: ")) {
+        const raw = carry.slice(6).trim();
+        if (raw && raw !== "[DONE]") {
+          try {
+            const j = JSON.parse(raw) as {
+              t?: string;
+              error?: string;
+              faithfulness?: FaithfulnessPayload;
+            };
+            if (j.error) {
+              full = `Sorry — ${j.error}`;
+              patchAi(full, null);
+            } else {
+              if (j.faithfulness) patchAi(full, j.faithfulness);
+              if (j.t) {
+                full += j.t;
+                patchAi(full);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      if (!full.trim()) {
+        setChat((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role === "ai" && !last.text.trim()) {
+            next[next.length - 1] = {
+              role: "ai",
+              text: "I'm sorry, I couldn't process that.",
+              faithfulness: null,
+            };
+          }
+          return next;
+        });
+      }
+    } catch {
+      setChat((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last?.role === "ai") {
+          next[next.length - 1] = {
+            role: "ai",
+            text: "Connection error. Is the backend running?",
+          };
+        }
+        return next;
+      });
     } finally {
       setQuestion("");
       setLoading(false);
@@ -270,6 +444,49 @@ export default function MedSync() {
                     <div className="text-sm leading-relaxed font-medium">
                        <ReactMarkdown>{msg.text}</ReactMarkdown>
                     </div>
+                    {msg.role === "ai" && msg.faithfulness && (
+                      <div
+                        className={`mt-3 pt-3 border-t text-[11px] leading-snug ${
+                          msg.faithfulness.unsupported_claims?.length ||
+                          msg.faithfulness.verification_failed
+                            ? "border-amber-200 bg-amber-50/80 text-amber-950 rounded-xl px-3 py-2 -mx-1"
+                            : "border-slate-200 bg-slate-50 text-slate-700 rounded-xl px-3 py-2 -mx-1"
+                        }`}
+                      >
+                        <p className="font-bold uppercase tracking-wide text-[9px] opacity-80 mb-1">
+                          Source check (vs. retrieved reports)
+                        </p>
+                        {msg.faithfulness.verification_failed ? (
+                          <p>{msg.faithfulness.notes || "Verification did not complete."}</p>
+                        ) : (
+                          <>
+                            {typeof msg.faithfulness.confidence === "number" && (
+                              <p className="font-semibold mb-1">
+                                Faithfulness: {Math.round(msg.faithfulness.confidence * 100)}%
+                              </p>
+                            )}
+                            {msg.faithfulness.unsupported_claims &&
+                            msg.faithfulness.unsupported_claims.length > 0 ? (
+                              <ul className="list-disc pl-4 space-y-0.5">
+                                {msg.faithfulness.unsupported_claims.map((c, idx) => (
+                                  <li key={idx}>{c}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-emerald-800 font-medium">
+                                No unsupported patient-specific claims flagged.
+                              </p>
+                            )}
+                            {msg.faithfulness.notes ? (
+                              <p className="mt-1 opacity-90">{msg.faithfulness.notes}</p>
+                            ) : null}
+                          </>
+                        )}
+                        <p className="mt-2 text-[10px] opacity-70 italic">
+                          Not a substitute for reading your original documents or clinical advice.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

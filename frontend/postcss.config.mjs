@@ -1,11 +1,5 @@
-/**
- * PostCSS config used by Next.js build pipeline.
- * Enables Tailwind CSS processing.
- */
-const config = {
+export default {
   plugins: {
     "@tailwindcss/postcss": {},
   },
 };
-
-export default config;

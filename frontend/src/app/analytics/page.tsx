@@ -98,12 +98,12 @@ export default function AnalyticsPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-10 pb-28">
+    <div className="max-w-6xl mx-auto space-y-8 pb-20 px-4 sm:px-6 lg:px-8 pt-8 sm:pt-10 lg:pt-12">
       <AnimatePresence mode="wait">
         {!selected ? (
           <motion.div key="grid" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-10">
             <h1 className="text-4xl font-bold text-[#1B4332]">Health Analytics</h1>
-            <div className="h-[550px] bg-white rounded-[3.5rem] border border-slate-100 relative overflow-hidden shadow-inner">
+            <div className="h-137.5 bg-white rounded-[3.5rem] border border-slate-100 relative overflow-hidden shadow-inner">
                {healthClusters.map((cluster) => (
                  <motion.div 
                    key={cluster.id} whileHover={{ scale: 1.1 }} onClick={() => setSelected(cluster)}
@@ -135,7 +135,7 @@ export default function AnalyticsPage() {
                 </div>
 
                 {/* --- THE INTERACTIVE CHART --- */}
-                <div className="relative h-[300px] w-full flex">
+                <div className="relative h-75 w-full flex">
                    {/* Y-Axis Labels */}
                    <div className="flex flex-col justify-between text-[10px] font-bold text-slate-300 pr-4 pb-8 uppercase">
                       <span>{selected.yMax}</span>
@@ -143,7 +143,7 @@ export default function AnalyticsPage() {
                       <span>0</span>
                    </div>
 
-                   <div className="flex-1 relative h-[250px]">
+                   <div className="flex-1 relative h-62.5">
                       {/* NEW: Tooltip Overlay */}
                       <AnimatePresence>
                         {tooltipData && (

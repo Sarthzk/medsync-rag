@@ -861,9 +861,24 @@ def _classify_intent(
     if cached:
         return cached
 
+    # Quick heuristic: detect ONLY pure greetings (no substantive question)
+    lower_q = normalized_question.lower()
+    pure_greeting_patterns = [
+        "^hello$", "^hi$", "^hey$", "^good morning$", "^good afternoon$", "^good evening$",
+        "^how are you", "^how's it going", "^what's up", "^yo$", "^sup$",
+        "^thanks$", "^thank you$", "^bye$", "^goodbye$", "^see you",
+    ]
+    import re
+    is_pure_greeting = any(re.match(pattern, lower_q) for pattern in pure_greeting_patterns)
+    
+    if is_pure_greeting:
+        intent: IntentLabel = "CONVERSATIONAL"
+        _INTENT_CACHE[cache_key] = intent
+        return intent
+
     if cfg.llm_disabled:
         # In budget mode, skip classifier API usage and prefer retrieval for safety.
-        intent: IntentLabel = "RETRIEVAL"
+        intent = "RETRIEVAL"
         _INTENT_CACHE[cache_key] = intent
         return intent
 
@@ -877,7 +892,7 @@ def _classify_intent(
             "Definitions:\n"
             "- RETRIEVAL: user asks about uploaded reports, their personal diagnosis/results/medications, or asks to extract/compare/report-specific facts.\n"
             "- GENERAL_MEDICAL: general health/medical knowledge question not tied to uploaded reports.\n"
-            "- CONVERSATIONAL: greetings, chitchat, non-medical/general assistant talk.\n"
+            "- CONVERSATIONAL: pure greetings, chitchat, non-medical/general assistant talk (with NO substantive question).\n"
             "Output only the label."
         )
     )
@@ -1150,6 +1165,33 @@ def _build_hyde_query(
         return base_question
 
 
+def _clean_response_formatting(text: str) -> str:
+    """
+    Clean up markdown formatting to make responses look more professional.
+    Converts markdown to plain text with proper formatting.
+    """
+    import re
+    
+    # Remove markdown headers (###, ##, #) and replace with bold text
+    text = re.sub(r'^###\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^##\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^#\s+', '', text, flags=re.MULTILINE)
+    
+    # Convert **text** to just text (remove bold markdown)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    
+    # Clean up bullet points with markdown (•• becomes •)
+    text = re.sub(r'•+', '•', text)
+    
+    # Remove excessive whitespace between sections
+    text = re.sub(r'\n\n\n+', '\n\n', text)
+    
+    # Clean up leading/trailing whitespace
+    text = text.strip()
+    
+    return text
+
+
 def build_medical_answer_chain(cfg: MedSyncConfig) -> Runnable:
     """
     Runnable that takes {"question": str, "docs": list[Document]} and returns str.
@@ -1401,12 +1443,13 @@ def answer_question(
         or cfg.llm_disabled
         or cfg.faithfulness_disabled
     ):
-        return answer
+        return _clean_response_formatting(answer)
 
     context = _format_context(docs)
     verdict = _verify_answer_faithfulness(cfg, question, context, answer)
     footer = faithfulness_footer_for_history(verdict)
-    return answer + footer if footer else answer
+    final_answer = answer + footer if footer else answer
+    return _clean_response_formatting(final_answer)
 
 
 def iter_chat_stream_events(
@@ -1538,6 +1581,24 @@ def stream_answer_question(
     ):
         if evt.get("event") == "token":
             yield evt.get("text") or ""
+
+
+def delete_document_by_filename(cfg: MedSyncConfig, filename: str) -> dict:
+    """
+    Deletes all vector chunks associated with a specific source filename from the vectorstore.
+    """
+    try:
+        _ensure_persist_directory(cfg)
+        vs = get_vectorstore(cfg)
+        
+        # Delete all documents with this source in metadata
+        vs._collection.delete(where={"source": {"$eq": filename}})
+        
+        logger.info(f"Deleted vector chunks for {filename}")
+        return {"message": f"Deleted {filename} from vector database"}
+    except Exception as e:
+        logger.exception(f"Failed to delete {filename} from vectorstore")
+        return {"error": str(e)}
 
 
 def clear_all_data(cfg: MedSyncConfig) -> dict:

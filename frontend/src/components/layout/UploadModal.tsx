@@ -47,7 +47,7 @@ export default function UploadModal({ isOpen, onClose }: { isOpen: boolean; onCl
 
               {/* Dropzone Area */}
               <div 
-                className="mt-8 border-2 border-dashed border-[#FFB4A2]/30 rounded-[2rem] p-12 bg-[#FDFDFB] cursor-pointer hover:border-[#FFB4A2] transition-all"
+                className="mt-8 border-2 border-dashed border-[#FFB4A2]/30 rounded-4xl p-12 bg-[#FDFDFB] cursor-pointer hover:border-[#FFB4A2] transition-all"
                 onClick={handleUpload}
               >
                 <div className="space-y-2">

@@ -9,11 +9,13 @@ import {
   User,
   Activity,
   ChevronRight,
-  LogOut 
+  LogOut,
+  Loader2 
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase";
 
 const navItems = [
   { name: "Home", icon: <Home size={20} />, href: "/" },
@@ -27,17 +29,37 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
   const router = useRouter(); 
   const [userName, setUserName] = useState("Guest User");
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
-    const savedName = localStorage.getItem("userName");
-    if (savedName) setUserName(savedName);
-  }, []);
+    const fetchUserName = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.user_metadata?.full_name) {
+          setUserName(user.user_metadata.full_name);
+        } else if (user?.email) {
+          setUserName(user.email.split("@")[0]);
+        }
+      } catch (err) {
+        console.error("Error fetching username:", err);
+      }
+    };
 
-  // 3. Logic to clear the session
-  const handleLogout = () => {
-    localStorage.clear(); // Clears name, email, and blood type
-    router.push("/login"); 
-    if (onClose) onClose(); // Closes mobile menu if open
+    fetchUserName();
+  }, [supabase]);
+
+  // Logout handler using Supabase
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+      router.push("/login");
+      if (onClose) onClose();
+    } catch (err) {
+      console.error("Logout error:", err);
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -85,14 +107,19 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
        
         <button 
           onClick={handleLogout}
-          className="flex items-center gap-4 px-4 py-2 text-sm font-medium text-rose-500 hover:text-rose-700 transition-colors w-full text-left group"
+          disabled={isLoggingOut}
+          className="flex items-center gap-4 px-4 py-2 text-sm font-medium text-rose-500 hover:text-rose-700 transition-colors w-full text-left group disabled:opacity-70 disabled:cursor-not-allowed"
         >
-          <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-          Logout
+          {isLoggingOut ? (
+            <Loader2 size={18} className="animate-spin" />
+          ) : (
+            <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
+          )}
+          {isLoggingOut ? "Logging out..." : "Logout"}
         </button>
 
         <Link href="/profile" onClick={onClose} className="group block">
-          <div className="flex items-center gap-3 p-4 rounded-[1.5rem] bg-white border border-slate-100 hover:border-[#FFB4A2]/30 transition-all hover:shadow-sm">
+          <div className="flex items-center gap-3 p-4 rounded-3xl bg-white border border-slate-100 hover:border-[#FFB4A2]/30 transition-all hover:shadow-sm">
             <div className="relative">
               <div className="w-10 h-10 rounded-xl bg-[#FFB4A2]/10 flex items-center justify-center text-[#1B4332] font-bold text-xs border border-[#FFB4A2]/20">
                 {userName.charAt(0).toUpperCase()}

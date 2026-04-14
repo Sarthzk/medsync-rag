@@ -16,7 +16,14 @@ export default function VaultPage() {
       const res = await fetch("/api/files"); // Use proxy route
       if (!res.ok) throw new Error("Failed to fetch files");
       const data = await res.json();
-      setRecords(data.files?.map((name: string) => ({ name })) || []);
+      // Handle both old format (array of strings) and new format (array of objects)
+      const filesList = data.files?.map((file: string | { name: string; url: string }) => {
+        if (typeof file === "string") {
+          return { name: file, url: `/api/files?filename=${encodeURIComponent(file)}` };
+        }
+        return file;
+      }) || [];
+      setRecords(filesList);
     } catch (err) {
       console.error("Failed to fetch records:", err);
       setRecords([]);
@@ -68,10 +75,10 @@ export default function VaultPage() {
     }
   };
   return (
-    <div className="p-8 max-w-6xl mx-auto relative">
+    <div className="p-6 sm:p-8 lg:p-8 max-w-6xl mx-auto relative pt-8 sm:pt-10 lg:pt-12">
       {/* POPUP MODAL */}
       {showPopup && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-200 flex items-center justify-center p-4">
           <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-[#1B4332]">Confirm Upload</h2>

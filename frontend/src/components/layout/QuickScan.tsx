@@ -165,7 +165,7 @@ export default function QuickScan() {
         onClick={() => {
           if (status === "idle") fileInputRef.current?.click();
         }}
-        className={`relative rounded-[2rem] border-2 border-dashed transition-all flex flex-col items-center justify-center gap-4 cursor-pointer
+        className={`relative rounded-4xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-4 cursor-pointer
           ${
             dragActive
               ? "border-[#FFB4A2] bg-orange-50"
@@ -197,7 +197,7 @@ export default function QuickScan() {
           {status === "success" && result && (
             <motion.div key="success" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-4 w-full">
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-[#2D6A4F] text-white rounded-full flex items-center justify-center flex-shrink-0 shadow-lg shadow-green-900/20">
+                <div className="w-8 h-8 bg-[#2D6A4F] text-white rounded-full flex items-center justify-center shrink-0 shadow-lg shadow-green-900/20">
                   <CheckCircle size={20} />
                 </div>
                 <div className="flex-1">
@@ -242,7 +242,7 @@ export default function QuickScan() {
           <motion.div 
             initial={{ top: 0 }} animate={{ top: "100%" }}
             transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-            className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#FFB4A2] to-transparent z-10 shadow-[0_0_15px_#FFB4A2]"
+            className="absolute left-0 right-0 h-1 bg-linear-to-r from-transparent via-[#FFB4A2] to-transparent z-10 shadow-[0_0_15px_#FFB4A2]"
           />
         )}
       </div>

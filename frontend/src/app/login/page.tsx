@@ -1,44 +1,55 @@
 "use client";
 import { motion } from "framer-motion";
-import { Mail, Lock, ArrowRight, ShieldCheck, Heart } from "lucide-react";
+import { Mail, Lock, ArrowRight, ShieldCheck, Heart, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { createClient } from "@/lib/supabase";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const supabase = createClient();
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
     const formDataObj = new FormData(e.currentTarget);
     const email = formDataObj.get("email")?.toString();
     const password = formDataObj.get("password")?.toString();
 
-    console.log("Attempting to connect to backend...");
+    if (!email || !password) {
+      setError("Email and password are required");
+      setIsLoading(false);
+      return;
+    }
 
     try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        localStorage.setItem("userName", data.user.name);
-        localStorage.setItem("userEmail", data.user.email);
-        localStorage.setItem("userBloodType", data.user.blood_type);
-        alert("Success! Redirecting...");
-        window.location.href = "/"; // Force refresh to update sidebar
-      } else {
-        alert("Login Error: " + data.detail);
+      if (signInError) {
+        setError(signInError.message);
+        setIsLoading(false);
+        return;
       }
+
+      // Success - redirect to chat
+      router.push("/chat");
     } catch (err) {
-      console.error("The fetch failed:", err);
-      alert("CONNECTION FAILED: Check if your Python terminal says 'Application startup complete'");
+      console.error("Login error:", err);
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 flex bg-[#FDFDFB] z-[100]">
+    <div className="fixed inset-0 flex bg-[#FDFDFB] z-100">
       {/* LEFT SIDE: Brand Identity */}
       <div className="hidden lg:flex w-1/2 bg-[#1B4332] relative overflow-hidden items-center justify-center p-20">
         <div className="relative z-10 max-w-md space-y-6">
@@ -52,7 +63,7 @@ export default function LoginPage() {
             Access your secure medical vault and health insights.
           </p>
         </div>
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-[#2D6A4F] rounded-full blur-[150px] opacity-30" />
+        <div className="absolute top-[-20%] left-[-10%] w-150 h-150 bg-[#2D6A4F] rounded-full blur-[150px] opacity-30" />
       </div>
 
       {/* RIGHT SIDE: Login Form */}
@@ -68,6 +79,12 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+                <p className="text-red-700 text-sm font-medium">{error}</p>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email</label>
               <div className="relative">
@@ -84,8 +101,17 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <button type="submit" className="w-full bg-[#1B4332] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-xl shadow-green-900/10 group">
-              Sign In <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+            <button type="submit" disabled={isLoading} className="w-full bg-[#1B4332] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-xl shadow-green-900/10 group disabled:opacity-70 disabled:cursor-not-allowed">
+              {isLoading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                <>
+                  Sign In <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
             </button>
           </form>
 

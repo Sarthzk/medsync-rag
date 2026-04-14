@@ -6,7 +6,7 @@ import QuickScan from "@/components/layout/QuickScan"; // Import the new compone
 
 export default function HomePage() {
   return (
-    <div className="max-w-6xl mx-auto space-y-10 pb-20 px-4 sm:px-6 lg:px-8">
+    <div className="max-w-6xl mx-auto space-y-10 pb-20 px-4 sm:px-6 lg:px-8 pt-8 sm:pt-10 lg:pt-12">
       
       {/* 1. Top Section: Hero + Quick Scan */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8">

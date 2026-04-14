@@ -116,7 +116,10 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-sm text-slate-400">
-            Don't have an account? <Link href="/signup" className="text-[#2D6A4F] font-bold hover:underline">Sign Up</Link>
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" className="text-[#2D6A4F] font-bold hover:underline">
+              Sign Up
+            </Link>
           </p>
 
           <div className="flex items-center gap-2 justify-center opacity-40 pt-4">

@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import Sidebar from "./Sidebar";
 import { createClient } from "@/lib/supabase";
+import Footer from "./Footer";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -56,7 +57,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   }
 
   return (
-    <div className="flex min-h-screen bg-[#FDFDFB]">
+    <div className="min-h-screen bg-[#FDFDFB]">
       {/* Mobile Hamburger Button */}
       {!isAuthPage && (
         <button
@@ -96,14 +97,17 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
       {/* Desktop Sidebar - Always Visible */}
       {!isAuthPage && (
-        <div className="hidden lg:block w-72 flex-shrink-0">
+        <div className="hidden lg:block fixed left-0 top-0 bottom-0 w-72 z-40">
           <Sidebar onClose={() => setSidebarOpen(false)} />
         </div>
       )}
       
-      <main className="flex-1 w-full">
-        {children}
-      </main>
+      <div className={`min-h-screen flex flex-col ${!isAuthPage ? "lg:pl-72" : ""}`}>
+        <main className="flex-1 w-full">
+          {children}
+        </main>
+        <Footer />
+      </div>
     </div>
   );
 }

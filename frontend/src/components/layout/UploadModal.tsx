@@ -1,6 +1,6 @@
 "use client";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UploadCloud, FileText, CheckCircle2 } from "lucide-react";
+import { X, UploadCloud, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
 
 export default function UploadModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {

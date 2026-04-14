@@ -25,10 +25,13 @@ from medsync_rag import (
     clear_all_data,
     delete_document_by_filename,
     faithfulness_footer_for_history,
+    get_latest_structured_report,
     ingest_medical_report,
     iter_chat_stream_events,
     load_config,
     _retrieve_rag_documents,
+    file_sha256,
+    purge_report_cache,
 )
 
 logging.basicConfig(
@@ -194,9 +197,20 @@ async def list_files():
     return {"files": [{"name": f, "url": f"/view-reports/{f}"} for f in valid_reports]}
 
 
+@app.get("/reports/latest")
+async def latest_report():
+    """Returns structured JSON for the most recently uploaded report (if any)."""
+    try:
+        cfg = load_config()
+        return get_latest_structured_report(cfg)
+    except Exception as e:
+        logger.exception("Latest report error")
+        return {"error": str(e), "structured_report": None}
+
+
 @app.delete("/files/{filename}")
 async def delete_file(filename: str):
-    """Deletes a file from the uploads directory and removes its vectors from the database."""
+    """Deletes a file from uploads, vectors, and extraction cache."""
     try:
         file_path = os.path.join(UPLOAD_DIR, filename)
         
@@ -206,19 +220,27 @@ async def delete_file(filename: str):
         
         if not os.path.exists(file_path):
             return {"error": "File not found"}
-        
+
+        cfg = load_config()
+        sha256 = file_sha256(file_path)
+
         # Delete from filesystem
         os.remove(file_path)
         logger.info(f"Deleted file: {filename}")
-        
+
         # Delete from vector database
-        cfg = load_config()
         vector_result = delete_document_by_filename(cfg, filename)
         
         if "error" in vector_result:
             logger.warning(f"File deleted but vector deletion failed: {vector_result['error']}")
-        
-        return {"message": f"Successfully deleted {filename}", "vector_deleted": "error" not in vector_result}
+
+        cache_result = purge_report_cache(cfg, sha256=sha256)
+
+        return {
+            "message": f"Successfully deleted {filename}",
+            "vector_deleted": "error" not in vector_result,
+            "cache_deleted": cache_result,
+        }
     except Exception as e:
         logger.exception("File deletion error")
         return {"error": str(e)}

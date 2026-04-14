@@ -1,6 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, FileText, AlertCircle, Zap, Trash2, ChevronDown } from "lucide-react";
+import { Send, Loader2, FileText, AlertCircle, Zap, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface Message {
@@ -11,20 +11,13 @@ interface Message {
   sources?: string[];
 }
 
-interface UploadedFile {
-  name: string;
-  url?: string;
-}
-
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<(string | UploadedFile)[]>([]);
   const [sessionId] = useState(() => `session_${Date.now()}`);
   const [error, setError] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom
@@ -32,69 +25,8 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Helper to extract filename from file object or string
-  const getFileName = (file: string | UploadedFile): string => {
-    return typeof file === "string" ? file : file.name;
-  };
-
-  // Fetch uploaded files on mount
-  useEffect(() => {
-    const fetchFiles = async () => {
-      try {
-        const res = await fetch("/api/files");
-        if (!res.ok) throw new Error("Failed to fetch files");
-        const data = await res.json();
-        setUploadedFiles(data.files || []);
-      } catch (err) {
-        console.error("Failed to fetch files:", err);
-        setUploadedFiles([]);
-      }
-    };
-    fetchFiles();
-  }, []);
-
-  // Poll files every 10 seconds
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch("/api/files");
-        if (res.ok) {
-          const data = await res.json();
-          setUploadedFiles(data.files || []);
-        }
-      } catch (err) {
-        console.error("Failed to poll files:", err);
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleDeleteFile = async (file: string | UploadedFile) => {
-    const filename = getFileName(file);
-    try {
-      const res = await fetch(`/api/files?filename=${encodeURIComponent(filename)}`, {
-        method: "DELETE",
-      });
-      
-      if (!res.ok) {
-        throw new Error("Failed to delete file");
-      }
-
-      // Refresh file list
-      const filesRes = await fetch("/api/files");
-      if (filesRes.ok) {
-        const data = await filesRes.json();
-        setUploadedFiles(data.files || []);
-      }
-      setDeleteConfirm(null);
-    } catch (err) {
-      console.error("Error deleting file:", err);
-      alert("Failed to delete file");
-    }
-  };
-
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendMessage = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!input.trim()) return;
 
     // Add user message to chat
@@ -187,7 +119,7 @@ export default function ChatPage() {
                   )
                 );
               }
-            } catch (e) {
+            } catch {
               // Skip invalid JSON
             }
           }
@@ -245,44 +177,6 @@ export default function ChatPage() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Delete Confirmation Modal */}
-        {deleteConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-2xl border border-slate-100 shadow-lg p-6 max-w-sm w-full space-y-4"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <AlertCircle size={20} className="text-red-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-[#1B4332]">Delete file?</h3>
-                  <p className="text-xs text-slate-500">This action cannot be undone</p>
-                </div>
-              </div>
-              <p className="text-sm text-slate-600">
-                Are you sure you want to delete <span className="font-semibold">{deleteConfirm.replace(/_/g, " ")}</span>?
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-700 font-medium hover:bg-slate-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => handleDeleteFile(deleteConfirm)}
-                  className="flex-1 px-4 py-2 rounded-lg bg-red-500 text-white font-medium hover:bg-red-600 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
         {/* Chat Messages */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4">

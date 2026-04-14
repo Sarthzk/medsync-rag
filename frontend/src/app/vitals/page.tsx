@@ -273,7 +273,7 @@ export default function VitalsPage() {
         <div className="bg-[#1B4332] text-white p-6 sm:p-8 lg:p-10 rounded-2xl sm:rounded-[2.5rem] lg:rounded-[3rem] relative overflow-hidden">
           <div className="relative z-10">
             <h3 className="text-lg sm:text-2xl font-bold mb-2">Weekly Activity</h3>
-            <p className="text-white/60 text-xs sm:text-sm mb-4 sm:mb-8">You've hit your movement goal 5 days this week.</p>
+            <p className="text-white/60 text-xs sm:text-sm mb-4 sm:mb-8">You&apos;ve hit your movement goal 5 days this week.</p>
             <div className="flex items-end gap-3 h-32">
               {[40, 70, 45, 90, 65, 80, 50].map((height, i) => (
                 <div 
@@ -297,7 +297,7 @@ export default function VitalsPage() {
           </div>
           <h3 className="text-base sm:text-lg lg:text-xl font-bold text-[#1B4332]">AI Health Suggestion</h3>
           <p className="text-slate-500 text-xs sm:text-sm leading-relaxed italic">
-            "Your resting heart rate has been 5% lower this week. This suggests improved cardiovascular recovery. Keep up the 20-minute morning walks!"
+            “Your resting heart rate has been 5% lower this week. This suggests improved cardiovascular recovery. Keep up the 20-minute morning walks!”
           </p>
         </div>
       </div>
@@ -356,7 +356,7 @@ export default function VitalsPage() {
             <div className="w-12 sm:w-16 h-12 sm:h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Activity size={20} className="text-slate-400" />
             </div>
-            <p className="text-xs sm:text-sm text-slate-500">No logged vitals yet. Start by clicking "Log Data" above.</p>
+            <p className="text-xs sm:text-sm text-slate-500">No logged vitals yet. Start by clicking &quot;Log Data&quot; above.</p>
           </div>
         )}
       </div>

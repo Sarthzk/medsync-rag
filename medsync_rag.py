@@ -129,6 +129,59 @@ def file_sha256(path: str) -> str:
     return _sha256_bytes(data)
 
 
+def get_structured_report(cfg: MedSyncConfig, report_path: str) -> dict:
+    """
+    Public helper: returns the structured report JSON for a given uploaded report.
+
+    Uses the same cached extraction as ingestion, and will regenerate extraction if
+    the cache is missing.
+    """
+    return _extract_structured_report_from_document(cfg, report_path)
+
+
+def get_latest_structured_report(cfg: MedSyncConfig) -> dict:
+    """
+    Returns the most recently modified report's structured data from the uploads dir.
+    """
+    uploads_dir = Path(cfg.uploads_dir)
+    if not uploads_dir.exists():
+        return {"error": "No uploads directory found.", "structured_report": None}
+
+    allowed = {".png", ".jpg", ".jpeg", ".heic", ".pdf"}
+    candidates = [p for p in uploads_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed]
+    if not candidates:
+        return {"error": "No reports uploaded yet.", "structured_report": None}
+
+    latest = max(candidates, key=lambda p: p.stat().st_mtime)
+    structured = get_structured_report(cfg, str(latest))
+    return {
+        "file": latest.name,
+        "modified_at": latest.stat().st_mtime,
+        "structured_report": structured,
+    }
+
+
+def purge_report_cache(cfg: MedSyncConfig, *, sha256: str) -> dict:
+    """
+    Deletes cached extraction artifacts for a report hash.
+    """
+    removed: list[str] = []
+    cache_dir = Path(cfg.cache_dir)
+    if not cache_dir.exists():
+        return {"removed": removed}
+
+    for suffix in (".vision.structured.json", ".pdf.structured.json"):
+        p = _cache_path(cfg, sha256, suffix)
+        try:
+            if p.exists():
+                p.unlink()
+                removed.append(p.name)
+        except Exception:
+            logger.warning("Failed to delete cache file %s", str(p), exc_info=True)
+
+    return {"removed": removed}
+
+
 def _cache_path(cfg: MedSyncConfig, key: str, suffix: str) -> Path:
     """Builds/creates cache path under local cache directory."""
     cache_dir = Path(cfg.cache_dir)
@@ -969,7 +1022,7 @@ def _rerank_documents(question: str, docs: list[Document], *, top_n: int) -> lis
     try:
         return _cohere_rerank_documents(question, docs, top_n=limited_n)
     except Exception:
-        logger.warning("Reranking unavailable; using vector similarity order.", exc_info=True)
+        logger.warning("Reranking unavailable; using vector similarity order.", exc_info=False)
         return docs[:limited_n]
 
 
@@ -1077,48 +1130,16 @@ def _build_hybrid_retriever(
     vs: Chroma, *, candidate_k: int, metadata_filter: dict | None = None
 ):
     """
-    Builds a hybrid retriever:
-    - BM25 keyword retriever over all indexed chunks
-    - semantic vector retriever from Chroma
-    Combined with EnsembleRetriever weights [0.4, 0.6] (BM25, semantic).
+    Returns the semantic retriever from Chroma.
+
+    Note: A previous version attempted a BM25+semantic ensemble via optional LangChain
+    community modules. To keep the project simpler and more reliable to deploy, this
+    now always uses semantic retrieval only.
     """
     search_kwargs = {"k": candidate_k}
     if metadata_filter:
         search_kwargs["filter"] = metadata_filter
-    semantic_retriever = vs.as_retriever(search_kwargs=search_kwargs)
-
-    try:
-        # Dynamic import avoids hard failure/linter issues when optional extras are missing.
-        ensemble_module = __import__("langchain.retrievers", fromlist=["EnsembleRetriever"])
-        bm25_module = __import__(
-            "langchain_community.retrievers", fromlist=["BM25Retriever"]
-        )
-        EnsembleRetriever = getattr(ensemble_module, "EnsembleRetriever")
-        BM25Retriever = getattr(bm25_module, "BM25Retriever")
-
-        payload = vs.get(include=["documents", "metadatas"])
-        raw_docs = payload.get("documents") or []
-        raw_metas = payload.get("metadatas") or []
-
-        bm25_docs: list[Document] = []
-        for idx, page_content in enumerate(raw_docs):
-            if not isinstance(page_content, str) or not page_content.strip():
-                continue
-            metadata = raw_metas[idx] if idx < len(raw_metas) and isinstance(raw_metas[idx], dict) else {}
-            bm25_docs.append(Document(page_content=page_content, metadata=metadata))
-
-        if not bm25_docs:
-            return semantic_retriever
-
-        bm25_retriever = BM25Retriever.from_documents(bm25_docs)
-        bm25_retriever.k = candidate_k
-        return EnsembleRetriever(
-            retrievers=[bm25_retriever, semantic_retriever],
-            weights=[0.4, 0.6],
-        )
-    except Exception:
-        logger.warning("Hybrid retrieval unavailable; using semantic retrieval only.", exc_info=True)
-        return semantic_retriever
+    return vs.as_retriever(search_kwargs=search_kwargs)
 
 
 def _build_hyde_query(

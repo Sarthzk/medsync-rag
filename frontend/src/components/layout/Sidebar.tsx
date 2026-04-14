@@ -6,7 +6,6 @@ import {
   LineChart, 
   Settings, 
   Heart, 
-  User,
   Activity,
   ChevronRight,
   LogOut,
@@ -63,15 +62,15 @@ export default function Sidebar({ onClose }: { onClose?: () => void }) {
   };
 
   return (
-    <aside className="w-72 h-full bg-[#FDFDFB] border-r border-slate-100 flex flex-col p-8 lg:sticky lg:top-0 z-20">
+    <aside className="w-72 h-screen bg-[#FDFDFB] border-r border-slate-100 flex flex-col p-8 z-20">
       <div className="flex items-center gap-3 mb-12">
         <div className="w-10 h-10 bg-[#FFB4A2]/20 rounded-2xl flex items-center justify-center text-[#FFB4A2]">
           <Heart size={24} fill="currentColor" />
         </div>
-        <h1 className="text-xl font-bold tracking-tighter text-[#1B4332]">MEDISYNC</h1>
+        <h1 className="text-xl font-bold tracking-tighter text-[#1B4332]">MEDSYNC</h1>
       </div>
 
-      <nav className="flex-1 space-y-2">
+      <nav className="flex-1 space-y-2 overflow-y-auto pr-2">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (

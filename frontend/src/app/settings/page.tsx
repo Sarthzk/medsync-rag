@@ -4,6 +4,7 @@ import { Bell, ShieldCheck, Database, Trash2, Smartphone, Loader2, AlertCircle }
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 interface UserSettings {
   user_id: string;
@@ -11,10 +12,17 @@ interface UserSettings {
   notifications_enabled: boolean;
 }
 
+type SettingRowProps = {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  action: React.ReactNode;
+};
+
 export default function SettingsPage() {
   const router = useRouter();
   const supabase = createClient();
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -212,7 +220,7 @@ export default function SettingsPage() {
     );
   }
 
-  const SettingRow = ({ icon, title, desc, action }: any) => (
+  const SettingRow = ({ icon, title, desc, action }: SettingRowProps) => (
     <div className="flex items-center justify-between p-6 hover:bg-[#FDFDFB] transition-colors group">
       <div className="flex items-center gap-5">
         <div className="p-3 bg-[#FFB4A2]/10 text-[#FFB4A2] rounded-2xl group-hover:scale-110 transition-transform">
@@ -357,7 +365,7 @@ export default function SettingsPage() {
 
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                Type "DELETE" to confirm
+                Type &quot;DELETE&quot; to confirm
               </label>
               <input
                 type="text"

@@ -19,7 +19,7 @@ async function fetchFromBackend(pathname: string, init?: RequestInit): Promise<R
       return await fetch(`${baseUrl}${pathname}`, {
         ...init,
         cache: "no-store",
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(15000),
       });
     } catch (err) {
       lastError = err;
@@ -28,39 +28,27 @@ async function fetchFromBackend(pathname: string, init?: RequestInit): Promise<R
   throw lastError ?? new Error("Backend unreachable");
 }
 
-export async function POST(req: Request) {
+export async function GET() {
   try {
-    const body = await req.json();
+    const res = await fetchFromBackend("/reports/latest");
+    const text = await res.text();
+    let data: unknown = {};
 
-    const res = await fetchFromBackend(`/chat/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      console.error(`Backend /chat/stream returned ${res.status}`);
-      const errorBody = await res.text();
-      console.error("Backend error body:", errorBody);
-      return NextResponse.json(
-        { error: `Backend returned ${res.status}`, details: errorBody },
-        { status: res.status }
-      );
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { error: "Invalid backend response", details: text };
+      }
     }
 
-    // Return the streaming response directly
-    return new NextResponse(res.body, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-      },
-    });
+    return NextResponse.json(data, { status: res.ok ? 200 : res.status });
   } catch (error) {
-    console.error("Chat Stream API Error:", error);
+    console.error("API Error:", error);
     return NextResponse.json(
       { error: "Backend connection failed", details: String(error) },
       { status: 503 }
     );
   }
 }
+

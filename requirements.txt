@@ -12,6 +12,9 @@ uvicorn
 python-dotenv
 python-multipart
 
+# Database (Vitals storage)
+supabase
+
 # RAG pipeline
 langchain-core
 langchain-openai

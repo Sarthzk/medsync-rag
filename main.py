@@ -19,6 +19,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from langchain_core.documents import Document
+from starlette.concurrency import run_in_threadpool
+from supabase import Client, create_client
 
 from medsync_rag import (
     answer_question,
@@ -62,6 +64,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SUPABASE_TABLE_VITALS = "vitals"
+_SUPABASE_CLIENT: Client | None = None
+
+
+def _get_supabase() -> Client:
+    """Create/reuse a Supabase client from environment variables."""
+    global _SUPABASE_CLIENT
+    if _SUPABASE_CLIENT is not None:
+        return _SUPABASE_CLIENT
+
+    url = (os.getenv("SUPABASE_URL") or "").strip()
+    key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    if not url or not key:
+        raise RuntimeError(
+            "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        )
+    _SUPABASE_CLIENT = create_client(url, key)
+    return _SUPABASE_CLIENT
 
 class ChatRequest(BaseModel):
     """Request payload schema for the chat endpoint."""
@@ -247,22 +268,41 @@ async def delete_file(filename: str):
 
 
 # --- VITALS ENDPOINTS ---
-VITALS_FILE = "vitals.json"
+async def _sb_list_vitals() -> list[dict]:
+    sb = _get_supabase()
 
-def load_vitals() -> list[dict]:
-    """Load vital logs from JSON file."""
-    if not os.path.exists(VITALS_FILE):
-        return []
-    try:
-        with open(VITALS_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return []
+    def _run():
+        res = (
+            sb.table(SUPABASE_TABLE_VITALS)
+            .select("*")
+            .order("timestamp", desc=True)
+            .execute()
+        )
+        return res.data or []
 
-def save_vitals(vitals: list[dict]):
-    """Save vital logs to JSON file."""
-    with open(VITALS_FILE, "w") as f:
-        json.dump(vitals, f, indent=2)
+    return await run_in_threadpool(_run)
+
+
+async def _sb_insert_vital(row: dict) -> dict:
+    sb = _get_supabase()
+
+    def _run():
+        res = sb.table(SUPABASE_TABLE_VITALS).insert(row).execute()
+        data = res.data or []
+        return data[0] if data else row
+
+    return await run_in_threadpool(_run)
+
+
+async def _sb_delete_vital(vital_id: str) -> bool:
+    sb = _get_supabase()
+
+    def _run():
+        res = sb.table(SUPABASE_TABLE_VITALS).delete().eq("id", vital_id).execute()
+        data = res.data or []
+        return len(data) > 0
+
+    return await run_in_threadpool(_run)
 
 class VitalLogRequest(BaseModel):
     heart_rate: int | None = None
@@ -272,16 +312,16 @@ class VitalLogRequest(BaseModel):
 @app.get("/vitals")
 async def get_vitals():
     """Returns all logged vitals in reverse chronological order."""
-    vitals = load_vitals()
-    # Sort by timestamp descending
-    vitals.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-    return {"logs": vitals}
+    try:
+        vitals = await _sb_list_vitals()
+        return {"logs": vitals}
+    except Exception as e:
+        logger.exception("Vitals list error")
+        return {"error": str(e), "logs": []}
 
 @app.post("/vitals")
 async def log_vital(request: VitalLogRequest):
     """Logs a new vital entry."""
-    vitals = load_vitals()
-    
     timestamp = int(datetime.now().timestamp() * 1000)
     date = datetime.now().strftime("%Y-%m-%d")
     
@@ -293,19 +333,24 @@ async def log_vital(request: VitalLogRequest):
         "date": date,
         "timestamp": timestamp,
     }
-    
-    vitals.append(new_log)
-    save_vitals(vitals)
-    
-    return new_log
+
+    try:
+        return await _sb_insert_vital(new_log)
+    except Exception as e:
+        logger.exception("Vitals insert error")
+        return {"error": str(e)}
 
 @app.delete("/vitals/{vital_id}")
 async def delete_vital(vital_id: str):
     """Deletes a vital log entry."""
-    vitals = load_vitals()
-    vitals = [v for v in vitals if v.get("id") != vital_id]
-    save_vitals(vitals)
-    return {"message": "Vital log deleted"}
+    try:
+        deleted = await _sb_delete_vital(vital_id)
+        if not deleted:
+            return {"error": "Vital log not found"}
+        return {"message": "Vital log deleted"}
+    except Exception as e:
+        logger.exception("Vitals delete error")
+        return {"error": str(e)}
 
 @app.post("/clear_db")
 async def clear_database():

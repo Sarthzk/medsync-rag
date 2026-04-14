@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from langchain_core.documents import Document
@@ -129,6 +130,18 @@ def _extract_sources(docs: list[Document]) -> list[str]:
 def read_root():
     """Simple API health/status endpoint."""
     return {"status": "MedSync-RAG API is Online"}
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    # Avoid Vercel rewriting favicon requests into noisy errors/404s.
+    return Response(status_code=204)
+
+
+@app.get("/favicon.png")
+def favicon_png():
+    return Response(status_code=204)
+
 
 @app.post("/upload")
 async def upload_report(file: UploadFile = File(...)):

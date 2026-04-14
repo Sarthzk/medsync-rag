@@ -49,12 +49,32 @@ SESSION_HISTORY: dict[str, deque[dict[str, str]]] = defaultdict(
 app = FastAPI()
 
 # --- DIRECTORY SETUP ---
-UPLOAD_DIR = "uploads"
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
+def _default_upload_dir() -> str:
+    # Vercel serverless has a read-only filesystem except for /tmp
+    if (os.getenv("VERCEL") or "").strip():
+        return "/tmp/uploads"
+    return "uploads"
 
-# Mount the uploads folder so the frontend can display images
-app.mount("/view-reports", StaticFiles(directory=UPLOAD_DIR), name="reports")
+
+UPLOAD_DIR = (os.getenv("MEDSYNC_UPLOAD_DIR") or "").strip() or _default_upload_dir()
+
+# Mount the uploads folder so the frontend can display images.
+# `check_dir=False` avoids import-time crashes on platforms where the directory
+# doesn't exist yet (e.g., serverless cold start).
+app.mount(
+    "/view-reports",
+    StaticFiles(directory=UPLOAD_DIR, check_dir=False),
+    name="reports",
+)
+
+
+@app.on_event("startup")
+def _ensure_upload_dir():
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except OSError:
+        # Best-effort: uploads are optional in serverless; /upload will surface errors if unwritable.
+        logger.exception("Could not create upload directory: %s", UPLOAD_DIR)
 
 # --- CORS CONFIGURATION ---
 app.add_middleware(
@@ -122,6 +142,7 @@ async def upload_report(file: UploadFile = File(...)):
 
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 

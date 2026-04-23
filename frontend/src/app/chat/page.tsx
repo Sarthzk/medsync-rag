@@ -1,7 +1,11 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, FileText, AlertCircle, Zap, ChevronDown } from "lucide-react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { Send, Loader2, FileText, AlertCircle, Zap, ChevronDown, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 interface Message {
   id: string;
@@ -11,23 +15,241 @@ interface Message {
   sources?: string[];
 }
 
+type LabResult = {
+  name: string;
+  value: string;
+  unit: string;
+  reference_range: string;
+  flag: string;
+};
+
+type StructuredReport = {
+  patient_name: string;
+  report_date: string;
+  report_type: string;
+  diagnoses: string[];
+  medications: string[];
+  lab_results: LabResult[];
+  doctor_notes: string;
+};
+
+type LatestReportResponse = {
+  error?: string;
+  file?: string;
+  modified_at?: number;
+  structured_report: StructuredReport | null;
+};
+
+const cleanTextForPdf = (text: string): string => {
+  return (text || "")
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, ""))
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1")
+    .replace(/^>\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+};
+
+const buildHealthSummaryPdf = (
+  report: StructuredReport,
+  reportFile: string | undefined,
+  conversation: Message[]
+) => {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  const lineHeight = 5;
+  let y = 42;
+
+  const ensureSpace = (neededHeight: number) => {
+    if (y + neededHeight > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  const addHeading = (title: string) => {
+    ensureSpace(12);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(27, 67, 50);
+    doc.text(title, margin, y);
+    y += 6;
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 5;
+  };
+
+  const addParagraph = (text: string, fontSize = 10) => {
+    const content = cleanTextForPdf(text);
+    if (!content) return;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(51, 65, 85);
+    const lines = doc.splitTextToSize(content, contentWidth) as string[];
+    for (const line of lines) {
+      ensureSpace(lineHeight + 1);
+      doc.text(line, margin, y);
+      y += lineHeight;
+    }
+    y += 1;
+  };
+
+  const addBulletList = (items: string[], emptyMessage: string) => {
+    if (!items.length) {
+      addParagraph(emptyMessage);
+      return;
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(51, 65, 85);
+    for (const item of items) {
+      const lines = doc.splitTextToSize(`• ${cleanTextForPdf(item)}`, contentWidth - 2) as string[];
+      for (const line of lines) {
+        ensureSpace(lineHeight + 1);
+        doc.text(line, margin, y);
+        y += lineHeight;
+      }
+      y += 1;
+    }
+  };
+
+  doc.setFillColor(27, 67, 50);
+  doc.rect(0, 0, pageWidth, 32, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text("MedSync Health Summary", margin, 16);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text("Generated from the latest structured report and recent conversation context", margin, 24);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, 28);
+
+  doc.setTextColor(15, 23, 42);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Report overview", margin, y);
+  y += 6;
+
+  const metaLines = [
+    `Patient: ${report.patient_name || "Unknown"}`,
+    `Report date: ${report.report_date || "Unknown"}`,
+    `Report type: ${report.report_type || "Unknown"}`,
+    reportFile ? `Source file: ${reportFile}` : null,
+  ].filter(Boolean) as string[];
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  metaLines.forEach((line) => {
+    ensureSpace(lineHeight + 1);
+    doc.text(line, margin, y);
+    y += lineHeight;
+  });
+
+  y += 2;
+
+  addHeading("Diagnoses");
+  addBulletList(report.diagnoses || [], "No diagnoses found in the latest report.");
+
+  addHeading("Medications");
+  addBulletList(report.medications || [], "No medications found in the latest report.");
+
+  addHeading("Lab results");
+  if (report.lab_results?.length) {
+    autoTable(doc, {
+      startY: y,
+      head: [["Lab", "Value", "Range", "Flag"]],
+      body: report.lab_results.slice(0, 15).map((lab) => [
+        cleanTextForPdf(lab.name || "Lab"),
+        cleanTextForPdf([lab.value, lab.unit].filter(Boolean).join(" ")) || "—",
+        cleanTextForPdf(lab.reference_range || ""),
+        cleanTextForPdf(lab.flag || ""),
+      ]),
+      margin: { left: margin, right: margin },
+      theme: "grid",
+      styles: {
+        fontSize: 8,
+        cellPadding: 2,
+        overflow: "linebreak",
+        valign: "middle",
+        textColor: [51, 65, 85],
+      },
+      headStyles: {
+        fillColor: [27, 67, 50],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+      },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    });
+    y = ((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? y) + 6;
+  } else {
+    addParagraph("No lab results found in the latest report.");
+  }
+
+  if (report.doctor_notes) {
+    addHeading("Clinical notes");
+    addParagraph(report.doctor_notes, 10);
+  }
+
+  const recentMessages = conversation.slice(-6);
+  if (recentMessages.length) {
+    addHeading("Recent conversation context");
+    recentMessages.forEach((message) => {
+      const prefix = message.role === "user" ? "Patient" : "Assistant";
+      addParagraph(`${prefix}: ${message.content}`, 9);
+    });
+  }
+
+  return doc;
+};
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isDownloadingSummary, setIsDownloadingSummary] = useState(false);
   const [sessionId] = useState(() => `session_${Date.now()}`);
   const [error, setError] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const didInitialScrollRef = useRef(false);
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  };
+
+  const handleMessagesScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 120;
+  };
+
+  useLayoutEffect(() => {
+    if (!messages.length) return;
+    if (!shouldAutoScrollRef.current) return;
+
+    const behavior: ScrollBehavior = isLoading || didInitialScrollRef.current ? "auto" : "smooth";
+    scrollToBottom(behavior);
+    didInitialScrollRef.current = true;
+  }, [messages, isLoading]);
 
   const handleSendMessage = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!input.trim()) return;
+
+    // User sent a new message from the composer, so keep the feed anchored.
+    shouldAutoScrollRef.current = true;
 
     // Add user message to chat
     const userMessage: Message = {
@@ -70,6 +292,7 @@ export default function ChatPage() {
       const decoder = new TextDecoder();
       let fullContent = "";
       let sources: string[] = [];
+      let sseBuffer = "";
 
       const assistantMessage: Message = {
         id: `msg_${Date.now()}`,
@@ -82,47 +305,55 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, assistantMessage]);
       const messageId = assistantMessage.id;
 
+      const processSseEvent = (eventBlock: string) => {
+        const lines = eventBlock.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.t) {
+              fullContent += parsed.t;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === messageId
+                    ? { ...m, content: fullContent }
+                    : m
+                )
+              );
+            } else if (parsed.sources && Array.isArray(parsed.sources)) {
+              sources = parsed.sources;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === messageId
+                    ? { ...m, sources }
+                    : m
+                )
+              );
+            }
+          } catch {
+            // Ignore malformed event payloads.
+          }
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.t) {
-                // Token stream
-                fullContent += parsed.t;
-                // Clean and format for display
-                const cleanContent = formatResponse(fullContent);
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === messageId
-                      ? { ...m, content: cleanContent }
-                      : m
-                  )
-                );
-              } else if (parsed.sources && Array.isArray(parsed.sources)) {
-                // Sources
-                sources = parsed.sources;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === messageId
-                      ? { ...m, sources }
-                      : m
-                  )
-                );
-              }
-            } catch {
-              // Skip invalid JSON
-            }
+        if (done) {
+          sseBuffer += decoder.decode();
+          if (sseBuffer.trim()) {
+            processSseEvent(sseBuffer);
           }
+          break;
+        }
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const events = sseBuffer.split("\n\n");
+        sseBuffer = events.pop() ?? "";
+        for (const eventBlock of events) {
+          processSseEvent(eventBlock);
         }
       }
     } catch (err) {
@@ -136,26 +367,39 @@ export default function ChatPage() {
     }
   };
 
-  // Function to clean and format response text for professional appearance
-  const formatResponse = (text: string): string => {
-    // Remove markdown headers (###, ##, #)
-    text = text.replace(/^###\s+/gm, "");
-    text = text.replace(/^##\s+/gm, "");
-    text = text.replace(/^#\s+/gm, "");
-    
-    // Remove bold markdown (**text** becomes text)
-    text = text.replace(/\*\*(.*?)\*\*/g, "$1");
-    
-    // Clean up bullet points (•• becomes •)
-    text = text.replace(/•+/g, "•");
-    
-    // Remove excessive whitespace between sections
-    text = text.replace(/\n\n\n+/g, "\n\n");
-    
-    // Clean up leading/trailing whitespace
-    text = text.trim();
-    
-    return text;
+  const handleDownloadSummary = async () => {
+    setIsDownloadingSummary(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/reports/latest");
+      const latestReport = (await res.json()) as LatestReportResponse;
+
+      if (!res.ok || !latestReport.structured_report) {
+        throw new Error(latestReport.error || "Upload a report first to generate a summary.");
+      }
+
+      const doc = buildHealthSummaryPdf(
+        latestReport.structured_report,
+        latestReport.file,
+        messages
+      );
+
+      const fileDate = (latestReport.structured_report.report_date || new Date().toISOString().slice(0, 10))
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "report";
+      const safePatient = (latestReport.structured_report.patient_name || "patient")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "patient";
+      doc.save(`medsync-health-summary-${safePatient}-${fileDate}.pdf`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to generate PDF summary.";
+      setError(message);
+    } finally {
+      setIsDownloadingSummary(false);
+    }
   };
 
   return (
@@ -163,13 +407,22 @@ export default function ChatPage() {
       {/* Header */}
       <div className="bg-white border-b border-slate-100 p-4 sm:p-6 shadow-sm">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="w-10 h-10 bg-[#1B4332] rounded-2xl flex items-center justify-center text-white shrink-0">
                 <Zap size={20} />
               </div>
               <h1 className="text-lg sm:text-2xl lg:text-3xl font-bold text-[#1B4332] truncate">MedSync AI Assistant</h1>
             </div>
+            <button
+              type="button"
+              onClick={handleDownloadSummary}
+              disabled={isDownloadingSummary || isLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs sm:text-sm font-semibold text-[#1B4332] shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isDownloadingSummary ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Download Summary
+            </button>
           </div>
           <p className="text-xs sm:text-sm text-slate-500">Ask questions about your uploaded medical documents</p>
         </div>
@@ -179,7 +432,11 @@ export default function ChatPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Chat Messages */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4">
+          <div
+            ref={messagesContainerRef}
+            onScroll={handleMessagesScroll}
+            className="flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6 space-y-3 sm:space-y-4"
+          >
             {messages.length === 0 ? (
               <div className="h-full flex items-center justify-center flex-col text-center px-4">
                 <div className="w-12 sm:w-16 h-12 sm:h-16 bg-[#1B4332]/10 rounded-3xl flex items-center justify-center mb-4">
@@ -209,7 +466,15 @@ export default function ChatPage() {
                               : "bg-white border border-slate-200 text-[#1B4332] rounded-bl-sm"
                           }`}
                         >
-                          <p className="text-xs sm:text-sm leading-relaxed">{message.content}</p>
+                          {message.role === "assistant" ? (
+                            <div className="text-xs sm:text-sm leading-relaxed prose prose-sm max-w-none prose-headings:text-[#1B4332] prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-strong:text-[#1B4332] prose-table:block prose-th:px-2 prose-td:px-2 prose-th:py-1 prose-td:py-1 prose-th:border prose-td:border prose-table:border-collapse prose-table:border-slate-200">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {message.content}
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                          )}
                           <p
                             className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${
                               message.role === "user" ? "text-white/60" : "text-slate-400"
@@ -303,8 +568,7 @@ export default function ChatPage() {
                 )}
               </>
             )}
-            <div ref={messagesEndRef} />
-          </div>
+            </div>
 
           {/* Input Area */}
           <div className="border-t border-slate-200 bg-white p-3 sm:p-4 lg:p-6">

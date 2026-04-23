@@ -126,6 +126,34 @@ user.user_metadata.full_name  // "John Doe"
 user.user_metadata.blood_type // "O+"
 ```
 
+## Medication Reminders
+
+The Medications tab stores reminder toggles in Supabase. Create this table in your database:
+
+```sql
+create table if not exists public.medication_reminders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  medication_key text not null,
+  medication_name text not null,
+  report_file text,
+  reminder_enabled boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, medication_key)
+);
+
+alter table public.medication_reminders enable row level security;
+
+create policy "Users manage their medication reminders"
+on public.medication_reminders
+for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+```
+
+This allows each user to save a reminder toggle per medication extracted from the latest report.
+
 ## Security Best Practices
 
 ✅ **Never commit `.env` files** - Use `.gitignore`  

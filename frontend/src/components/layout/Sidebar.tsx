@@ -7,6 +7,7 @@ import {
   Settings, 
   Heart, 
   Activity,
+  Pill,
   ChevronRight,
   LogOut,
   Loader2 
@@ -19,6 +20,7 @@ import { createClient } from "@/lib/supabase";
 const navItems = [
   { name: "Home", icon: <Home size={20} />, href: "/" },
   { name: "Health Overview", icon: <LineChart size={20} />, href: "/analytics" }, 
+  { name: "Medications", icon: <Pill size={20} />, href: "/medications" },
   { name: "MedSync AI", icon: <MessageSquare size={20} />, href: "/chat" },
   { name: "Health Vault", icon: <FolderHeart size={20} />, href: "/vault" },
   { name: "Vitals", icon: <Activity size={20} />, href: "/vitals" },

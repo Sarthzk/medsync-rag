@@ -1,6 +1,6 @@
 "use client";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import Sidebar from "./Sidebar";
@@ -12,10 +12,17 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const supabase = createClient();
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  const userRef = useRef<unknown>(null);
+  const isAuthPageRef = useRef(false);
+  if (!supabaseRef.current) {
+    supabaseRef.current = createClient();
+  }
+  const supabase = supabaseRef.current;
   
   // Hide sidebar on Login and Signup pages
   const isAuthPage = pathname === "/login" || pathname === "/signup";
+  isAuthPageRef.current = isAuthPage;
   
   // Close sidebar on Escape key
   useEffect(() => {
@@ -30,26 +37,59 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
   // Check if user is authenticated
   useEffect(() => {
-    const checkAuth = async () => {
+    let isMounted = true;
+
+    const initializeAuth = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        
-        // If not logged in and not on auth page, redirect to login
-        if (!user && !isAuthPage) {
+        userRef.current = user;
+
+        if (!isMounted) return;
+
+        if (!user && !isAuthPageRef.current) {
           router.push("/login");
-        } else {
-          setIsLoading(false);
         }
       } catch (err) {
         console.error("Auth check error:", err);
-        if (!isAuthPage) {
+        userRef.current = null;
+        if (!isAuthPageRef.current) {
           router.push("/login");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
         }
       }
     };
 
-    checkAuth();
-  }, [pathname, isAuthPage, supabase, router]);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      userRef.current = session?.user ?? null;
+
+      if (!session?.user && !isAuthPageRef.current) {
+        router.push("/login");
+      }
+
+      setIsLoading(false);
+    });
+
+    initializeAuth();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [router, supabase]);
+
+  // Re-check route access on navigation using cached auth state.
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!userRef.current && !isAuthPage) {
+      router.push("/login");
+    }
+  }, [isLoading, isAuthPage, router]);
 
   // If loading and not on auth page, show nothing (prevents flash of content)
   if (isLoading && !isAuthPage) {

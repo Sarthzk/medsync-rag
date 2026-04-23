@@ -39,8 +39,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Success - redirect to chat
-      router.push("/chat");
+      // Success - redirect to home page
+      router.push("/");
     } catch (err) {
       console.error("Login error:", err);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");

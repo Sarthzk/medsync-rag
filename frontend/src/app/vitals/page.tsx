@@ -12,23 +12,34 @@ interface VitalLog {
   timestamp: number;
 }
 
+interface WeeklyActivityPoint {
+  dayLabel: string;
+  value: number | null;
+  displayValue: string;
+  unit: string;
+  height: number;
+}
+
 const getVitalCards = (vitalLogs: VitalLog[]) => {
-  // Get the most recent valid values for each metric
-  const recentHeartRate = vitalLogs.find(log => log.heart_rate !== null)?.heart_rate || 72;
-  const recentSleepQuality = vitalLogs.find(log => log.sleep_quality !== null)?.sleep_quality || 7.33;
-  const recentSteps = vitalLogs.find(log => log.daily_steps !== null)?.daily_steps || 8432;
-  
-  // Format sleep quality
-  const sleepHours = Math.floor(recentSleepQuality);
-  const sleepMinutes = Math.round((recentSleepQuality - sleepHours) * 60);
-  const sleepFormatted = `${sleepHours}h ${sleepMinutes}m`;
+  // Get the most recent valid values for each metric.
+  const recentHeartRate = vitalLogs.find((log) => log.heart_rate !== null)?.heart_rate ?? null;
+  const recentSleepQuality = vitalLogs.find((log) => log.sleep_quality !== null)?.sleep_quality ?? null;
+  const recentSteps = vitalLogs.find((log) => log.daily_steps !== null)?.daily_steps ?? null;
+
+  // Format sleep quality only when real data exists.
+  let sleepFormatted = "--";
+  if (recentSleepQuality !== null) {
+    const sleepHours = Math.floor(recentSleepQuality);
+    const sleepMinutes = Math.round((recentSleepQuality - sleepHours) * 60);
+    sleepFormatted = `${sleepHours}h ${sleepMinutes}m`;
+  }
 
   return [
     { 
       title: "Heart Rate", 
-      value: recentHeartRate.toString(), 
+      value: recentHeartRate !== null ? recentHeartRate.toString() : "--",
       unit: "bpm", 
-      status: recentHeartRate < 100 ? "Normal" : "Elevated", 
+      status: recentHeartRate === null ? "No data" : recentHeartRate < 100 ? "Normal" : "Elevated",
       icon: <Heart size={24} />, 
       color: "bg-[#FFB4A2]/10", 
       textColor: "text-[#FFB4A2]" 
@@ -37,21 +48,66 @@ const getVitalCards = (vitalLogs: VitalLog[]) => {
       title: "Sleep Quality", 
       value: sleepFormatted, 
       unit: "Restorative", 
-      status: recentSleepQuality >= 7 ? "Good" : "Fair", 
+      status: recentSleepQuality === null ? "No data" : recentSleepQuality >= 7 ? "Good" : "Fair",
       icon: <Moon size={24} />, 
       color: "bg-[#2D6A4F]/10", 
       textColor: "text-[#2D6A4F]" 
     },
     { 
       title: "Daily Steps", 
-      value: recentSteps.toLocaleString(), 
+      value: recentSteps !== null ? recentSteps.toLocaleString() : "--",
       unit: "steps", 
-      status: recentSteps >= 8000 ? "Active" : "Moderate", 
+      status: recentSteps === null ? "No data" : recentSteps >= 8000 ? "Active" : "Moderate",
       icon: <Footprints size={24} />, 
       color: "bg-[#1B4332]/5", 
       textColor: "text-[#1B4332]" 
     },
   ];
+};
+
+const getWeeklyActivityData = (vitalLogs: VitalLog[]): WeeklyActivityPoint[] => {
+  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const recentLogs = [...vitalLogs]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 7)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  const byDay = new Map<string, { value: number; unit: string }>();
+
+  for (const log of recentLogs) {
+    const dayLabel = dayLabels[new Date(log.timestamp).getDay() === 0 ? 6 : new Date(log.timestamp).getDay() - 1];
+    const metricValue = log.daily_steps ?? log.heart_rate;
+    const unit = log.daily_steps !== null ? "steps" : log.heart_rate !== null ? "bpm" : "";
+
+    if (metricValue === null || !unit) continue;
+
+    byDay.set(dayLabel, { value: metricValue, unit });
+  }
+
+  const values = Array.from(byDay.values()).map((item) => item.value);
+  const maxValue = values.length > 0 ? Math.max(...values) : 0;
+
+  return dayLabels.map((dayLabel) => {
+    const entry = byDay.get(dayLabel) ?? null;
+
+    if (!entry) {
+      return {
+        dayLabel,
+        value: null,
+        displayValue: "No data",
+        unit: "",
+        height: 8,
+      };
+    }
+
+    return {
+      dayLabel,
+      value: entry.value,
+      displayValue: entry.unit === "steps" ? entry.value.toLocaleString() : `${entry.value}`,
+      unit: entry.unit,
+      height: maxValue > 0 ? Math.max(12, (entry.value / maxValue) * 100) : 12,
+    };
+  });
 };
 
 export default function VitalsPage() {
@@ -122,7 +178,7 @@ export default function VitalsPage() {
 
   const handleDeleteLog = async (id: string) => {
     try {
-      const res = await fetch(`/api/vitals?id=${id}`, {
+      const res = await fetch(`/api/vitals/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
 
@@ -134,6 +190,9 @@ export default function VitalsPage() {
       alert("Failed to delete log");
     }
   };
+
+  const weeklyActivityData = getWeeklyActivityData(vitalLogs);
+  const hasWeeklyActivity = weeklyActivityData.some((point) => point.value !== null);
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 sm:space-y-10 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-8 lg:pt-12 pb-20">
@@ -157,7 +216,7 @@ export default function VitalsPage() {
           <motion.div
             initial={{ scale: 0.95, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="bg-white rounded-t-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto"
+            className="bg-white rounded-t-4xl sm:rounded-[2.5rem] p-6 sm:p-8 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto"
           >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl sm:text-2xl font-bold text-[#1B4332]">Log Your Vitals</h2>
@@ -273,18 +332,29 @@ export default function VitalsPage() {
         <div className="bg-[#1B4332] text-white p-6 sm:p-8 lg:p-10 rounded-2xl sm:rounded-[2.5rem] lg:rounded-[3rem] relative overflow-hidden">
           <div className="relative z-10">
             <h3 className="text-lg sm:text-2xl font-bold mb-2">Weekly Activity</h3>
-            <p className="text-white/60 text-xs sm:text-sm mb-4 sm:mb-8">You&apos;ve hit your movement goal 5 days this week.</p>
-            <div className="flex items-end gap-3 h-32">
-              {[40, 70, 45, 90, 65, 80, 50].map((height, i) => (
-                <div 
-                  key={i} 
-                  className="flex-1 bg-white/20 rounded-t-lg hover:bg-[#FFB4A2] transition-all cursor-pointer" 
-                  style={{ height: `${height}%` }}
-                />
+            <p className="text-white/60 text-xs sm:text-sm mb-4 sm:mb-8">
+              {hasWeeklyActivity
+                ? "Showing the last 7 logged entries grouped by weekday."
+                : "No recent activity yet. Log vitals to populate this chart."}
+            </p>
+            <div className="flex items-end gap-3 h-36">
+              {weeklyActivityData.map((point) => (
+                <div key={point.dayLabel} className="flex-1 flex flex-col items-center gap-2 min-w-0">
+                  <div className="h-28 w-full flex items-end">
+                    <div
+                      className={`w-full rounded-t-lg transition-all ${point.value !== null ? "bg-white/20 hover:bg-[#FFB4A2]" : "bg-white/10"}`}
+                      style={{ height: `${point.height}%` }}
+                      title={point.value !== null ? `${point.dayLabel}: ${point.displayValue} ${point.unit}` : `${point.dayLabel}: No data`}
+                    />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[10px] font-bold text-white/40 uppercase tracking-widest">{point.dayLabel}</div>
+                    <div className="text-[10px] text-white/70 mt-1">
+                      {point.value !== null ? `${point.displayValue} ${point.unit}` : point.displayValue}
+                    </div>
+                  </div>
+                </div>
               ))}
-            </div>
-            <div className="flex justify-between mt-4 text-[10px] font-bold text-white/40 uppercase tracking-widest">
-              <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
             </div>
           </div>
           {/* Decorative Pattern */}

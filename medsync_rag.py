@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+from functools import lru_cache
 from datetime import UTC, datetime
 import urllib.error
 import urllib.request
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Literal
 
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 from langchain_chroma import Chroma
@@ -38,7 +39,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 logger = logging.getLogger("medsync")
 
 IntentLabel = Literal["RETRIEVAL", "GENERAL_MEDICAL", "CONVERSATIONAL"]
-_INTENT_CACHE: dict[str, IntentLabel] = {}
 
 
 def _history_to_text(history: list[dict] | None, *, max_turns: int = 5) -> str:
@@ -191,10 +191,15 @@ def _cache_path(cfg: MedSyncConfig, key: str, suffix: str) -> Path:
 
 def _encode_image_to_base64_jpeg(image_path: str) -> str:
     """Converts image to base64 JPEG payload for vision model input."""
-    with Image.open(image_path) as img:
-        buffer = io.BytesIO()
-        img.convert("RGB").save(buffer, format="JPEG")
-        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    try:
+        with Image.open(image_path) as img:
+            buffer = io.BytesIO()
+            img.convert("RGB").save(buffer, format="JPEG")
+            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    except UnidentifiedImageError as exc:
+        raise ValueError(
+            f"Uploaded file {Path(image_path).name} is not a valid image."
+        ) from exc
 
 
 def _encode_pil_to_base64_jpeg(img: Image.Image) -> str:
@@ -697,17 +702,51 @@ def _is_readonly_db_error(exc: Exception) -> bool:
     return "readonly" in str(exc).lower()
 
 
+def _is_chroma_config_corruption_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "'_type'" in text or '"_type"' in text
+
+
 def get_vectorstore(cfg: MedSyncConfig) -> Chroma:
     """
     Single source of truth for Chroma config so ingest/query/main all agree.
     """
     _ensure_persist_directory(cfg)
     embeddings = OpenAIEmbeddings(model=cfg.embedding_model)
-    return Chroma(
-        collection_name=cfg.collection_name,
-        persist_directory=cfg.persist_dir,
-        embedding_function=embeddings,
-    )
+
+    def _build(persist_dir: str) -> Chroma:
+        return Chroma(
+            collection_name=cfg.collection_name,
+            persist_directory=persist_dir,
+            embedding_function=embeddings,
+        )
+
+    try:
+        return _build(cfg.persist_dir)
+    except Exception as exc:
+        if not _is_chroma_config_corruption_error(exc):
+            raise
+
+        logger.warning(
+            "Detected corrupted/incompatible Chroma metadata at %s; rebuilding local vector index.",
+            cfg.persist_dir,
+            exc_info=True,
+        )
+        _reset_vectorstore_directory(cfg)
+        try:
+            return _build(cfg.persist_dir)
+        except Exception as retry_exc:
+            if not _is_chroma_config_corruption_error(retry_exc):
+                raise
+
+            fallback_dir = f"{cfg.persist_dir}_fresh"
+            Path(fallback_dir).mkdir(parents=True, exist_ok=True)
+            logger.warning(
+                "Primary Chroma directory still corrupted after reset; using fallback directory %s.",
+                fallback_dir,
+                exc_info=True,
+            )
+            return _build(fallback_dir)
 
 
 def _reset_vectorstore_directory(cfg: MedSyncConfig) -> None:
@@ -897,43 +936,24 @@ def _normalize_intent_label(raw: str) -> IntentLabel:
     return "CONVERSATIONAL"
 
 
-def _classify_intent(
-    cfg: MedSyncConfig, question: str, *, history: list[dict] | None = None
+@lru_cache(maxsize=500)
+def _classify_intent_cached(
+    history_text: str, normalized_question: str, llm_disabled: bool
 ) -> IntentLabel:
-    """
-    Lightweight intent classification with per-session in-memory cache.
-    Returns one of: RETRIEVAL, GENERAL_MEDICAL, CONVERSATIONAL.
-    """
-    normalized_question = (question or "").strip()
-    if not normalized_question:
-        return "CONVERSATIONAL"
-
-    history_text = _history_to_text(history, max_turns=5)
-    cache_key = f"{history_text}\n\n{normalized_question}".lower()
-    cached = _INTENT_CACHE.get(cache_key)
-    if cached:
-        return cached
-
-    # Quick heuristic: detect ONLY pure greetings (no substantive question)
     lower_q = normalized_question.lower()
     pure_greeting_patterns = [
         "^hello$", "^hi$", "^hey$", "^good morning$", "^good afternoon$", "^good evening$",
         "^how are you", "^how's it going", "^what's up", "^yo$", "^sup$",
         "^thanks$", "^thank you$", "^bye$", "^goodbye$", "^see you",
     ]
-    import re
     is_pure_greeting = any(re.match(pattern, lower_q) for pattern in pure_greeting_patterns)
-    
-    if is_pure_greeting:
-        intent: IntentLabel = "CONVERSATIONAL"
-        _INTENT_CACHE[cache_key] = intent
-        return intent
 
-    if cfg.llm_disabled:
+    if is_pure_greeting:
+        return "CONVERSATIONAL"
+
+    if llm_disabled:
         # In budget mode, skip classifier API usage and prefer retrieval for safety.
-        intent = "RETRIEVAL"
-        _INTENT_CACHE[cache_key] = intent
-        return intent
+        return "RETRIEVAL"
 
     require_openai_key()
     classifier = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_tokens=8)
@@ -958,9 +978,22 @@ def _classify_intent(
     raw = classifier.invoke([system, human]).content
     if not isinstance(raw, str):
         raw = str(raw)
-    intent = _normalize_intent_label(raw)
-    _INTENT_CACHE[cache_key] = intent
-    return intent
+    return _normalize_intent_label(raw)
+
+
+def _classify_intent(
+    cfg: MedSyncConfig, question: str, *, history: list[dict] | None = None
+) -> IntentLabel:
+    """
+    Lightweight intent classification with per-session in-memory cache.
+    Returns one of: RETRIEVAL, GENERAL_MEDICAL, CONVERSATIONAL.
+    """
+    normalized_question = (question or "").strip()
+    if not normalized_question:
+        return "CONVERSATIONAL"
+
+    history_text = _history_to_text(history, max_turns=5)
+    return _classify_intent_cached(history_text, normalized_question.lower(), cfg.llm_disabled)
 
 
 def _cohere_rerank_documents(
@@ -1188,29 +1221,13 @@ def _build_hyde_query(
 
 def _clean_response_formatting(text: str) -> str:
     """
-    Clean up markdown formatting to make responses look more professional.
-    Converts markdown to plain text with proper formatting.
+    Normalize whitespace while preserving markdown structure for the client renderer.
     """
     import re
-    
-    # Remove markdown headers (###, ##, #) and replace with bold text
-    text = re.sub(r'^###\s+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^##\s+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^#\s+', '', text, flags=re.MULTILINE)
-    
-    # Convert **text** to just text (remove bold markdown)
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-    
-    # Clean up bullet points with markdown (•• becomes •)
-    text = re.sub(r'•+', '•', text)
-    
-    # Remove excessive whitespace between sections
-    text = re.sub(r'\n\n\n+', '\n\n', text)
-    
-    # Clean up leading/trailing whitespace
-    text = text.strip()
-    
-    return text
+
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return text.strip()
 
 
 def build_medical_answer_chain(cfg: MedSyncConfig) -> Runnable:

@@ -1,36 +1,5 @@
 import { NextResponse } from "next/server";
-
-const getBackendBaseUrls = () => {
-  const urls: string[] = [];
-  const envUrl =
-    process.env.BACKEND_API_BASE_URL?.trim() ||
-    process.env.BACKEND_API_URL?.trim() ||
-    process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-
-  if (envUrl) urls.push(envUrl);
-  urls.push("http://127.0.0.1:8000", "http://localhost:8000");
-  return urls;
-};
-
-async function fetchFromBackend(
-  pathname: string,
-  init?: RequestInit
-): Promise<Response> {
-  let lastError: unknown;
-  for (const baseUrl of getBackendBaseUrls()) {
-    try {
-      return await fetch(`${baseUrl}${pathname}`, {
-        ...init,
-        cache: "no-store",
-        // Avoid hanging the UI forever if backend is down.
-        signal: AbortSignal.timeout(8000),
-      });
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError ?? new Error("Backend unreachable");
-}
+import { fetchFromBackend } from "@/lib/backend";
 
 function guessContentType(filename: string): string | null {
   const lower = filename.toLowerCase();
@@ -50,7 +19,7 @@ export async function GET(req: Request) {
     if (filename) {
       const fileRes = await fetchFromBackend(
         `/view-reports/${encodeURIComponent(filename)}`
-      );
+      , undefined, 8000);
       
       if (!fileRes.ok) {
         return NextResponse.json(
@@ -78,7 +47,7 @@ export async function GET(req: Request) {
     }
 
     // Otherwise, list files
-    const res = await fetchFromBackend("/files");
+    const res = await fetchFromBackend("/files", undefined, 8000);
     
     if (!res.ok) {
       return NextResponse.json(
@@ -141,7 +110,7 @@ export async function DELETE(req: Request) {
 
     const res = await fetchFromBackend(`/files/${encodeURIComponent(filename)}`, {
       method: "DELETE",
-    });
+    }, 8000);
     
     if (!res.ok) {
       const error = await res.json();

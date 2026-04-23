@@ -11,12 +11,14 @@ import os
 import shutil
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
-from collections import defaultdict, deque
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from langchain_core.documents import Document
@@ -42,12 +44,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger("medsync.api")
-SESSION_MEMORY_WINDOW_TURNS = 5
-SESSION_HISTORY: dict[str, deque[dict[str, str]]] = defaultdict(
-    lambda: deque(maxlen=SESSION_MEMORY_WINDOW_TURNS)
-)
 
-app = FastAPI()
+# Load root .env before any startup validation or env-dependent config reads.
+load_dotenv(override=False)
 
 # --- DIRECTORY SETUP ---
 def _default_upload_dir() -> str:
@@ -59,6 +58,56 @@ def _default_upload_dir() -> str:
 
 UPLOAD_DIR = (os.getenv("MEDSYNC_UPLOAD_DIR") or "").strip() or _default_upload_dir()
 
+
+def _validate_required_env_vars() -> None:
+    """Validates that all required environment variables are set at startup.
+    
+    Exits with a clear error message if any are missing, preventing silent crashes
+    during request handling.
+    """
+    required_vars = {
+        "OPENAI_API_KEY": "OpenAI API key for LLM completions",
+        "SUPABASE_URL": "Supabase project URL for vitals storage",
+        "SUPABASE_SERVICE_ROLE_KEY": "Supabase service role key for admin access",
+    }
+    
+    missing_vars = []
+    for var_name, description in required_vars.items():
+        value = (os.getenv(var_name) or "").strip()
+        if not value:
+            missing_vars.append(f"  • {var_name}: {description}")
+    
+    if missing_vars:
+        error_msg = (
+            "\n❌ STARTUP FAILED: Missing required environment variables.\n"
+            "Please set the following in your deployment environment:\n"
+            + "\n".join(missing_vars) +
+            "\n\nFor Railway, add these in your project's Variables section.\n"
+            "For local development, add them to .env"
+        )
+        logger.critical(error_msg)
+        raise RuntimeError(error_msg)
+    
+    logger.info("✓ All required environment variables are set")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Validate critical environment variables first.
+    load_dotenv(override=False)
+    _validate_required_env_vars()
+
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except OSError:
+        # Best-effort: uploads are optional in serverless; /upload will surface errors if unwritable.
+        logger.exception("Could not create upload directory: %s", UPLOAD_DIR)
+
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
 # Mount the uploads folder so the frontend can display images.
 # `check_dir=False` avoids import-time crashes on platforms where the directory
 # doesn't exist yet (e.g., serverless cold start).
@@ -67,20 +116,10 @@ app.mount(
     StaticFiles(directory=UPLOAD_DIR, check_dir=False),
     name="reports",
 )
-
-
-@app.on_event("startup")
-def _ensure_upload_dir():
-    try:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-    except OSError:
-        # Best-effort: uploads are optional in serverless; /upload will surface errors if unwritable.
-        logger.exception("Could not create upload directory: %s", UPLOAD_DIR)
-
 # --- CORS CONFIGURATION ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["https://your-app.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -149,31 +188,53 @@ async def upload_report(file: UploadFile = File(...)):
     if not file.filename:
         return {"error": "Missing filename."}
 
+    # Sanitize any client-supplied path components.
+    filename = os.path.basename(file.filename).replace("..", "").strip()
+    if not filename:
+        return {"error": "Invalid filename."}
+
     allowed = (".png", ".jpg", ".jpeg", ".heic", ".pdf")
-    if not file.filename.lower().endswith(allowed):
+    if not filename.lower().endswith(allowed):
         return {"error": f"Unsupported file type. Allowed: {', '.join(allowed)}"}
 
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    upload_root = os.path.abspath(UPLOAD_DIR)
+    file_path = os.path.abspath(os.path.join(upload_root, filename))
+    if os.path.commonpath([upload_root, file_path]) != upload_root:
+        return {"error": "Invalid file path."}
+
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
+        if os.path.getsize(file_path) == 0:
+            try:
+                os.remove(file_path)
+            except OSError:
+                logger.warning("Could not remove empty upload file: %s", file_path, exc_info=True)
+            return JSONResponse({"error": "Uploaded file is empty."}, status_code=400)
+
         cfg = load_config()
         result = ingest_medical_report(cfg, file_path)
-        return {"message": f"Successfully ingested {file.filename}", "details": result}
+        return {"message": f"Successfully ingested {filename}", "details": result}
+    except (ValueError, FileNotFoundError) as e:
+        logger.warning("Upload rejected: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         logger.exception("Upload error")
-        return {"error": str(e)}
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/chat")
 async def chat_with_report(request: ChatRequest):
-    """Answers user questions via retrieval + conversational routing pipeline."""
+    """Answers user questions via retrieval + conversational routing pipeline.
+
+    Conversation context is sourced from client-provided `history`.
+    """
     try:
         logger.info("Received question")
         cfg = load_config()
         session_id = (request.session_id or "default").strip() or "default"
-        history = request.history if request.history is not None else list(SESSION_HISTORY[session_id])
+        history = request.history or []
         
         # Retrieve documents to extract sources
         docs = _retrieve_rag_documents(cfg, request.question, k=5, history=history)
@@ -186,11 +247,10 @@ async def chat_with_report(request: ChatRequest):
             history=history,
             skip_faithfulness=request.skip_faithfulness,
         )
-        SESSION_HISTORY[session_id].append({"user": request.question, "assistant": answer})
         return {"answer": answer, "sources": sources, "session_id": session_id}
     except Exception as e:
         logger.exception("Chat error")
-        return {"error": str(e)}
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/chat/stream")
@@ -198,7 +258,7 @@ async def chat_with_report_stream(request: ChatRequest):
     """Same routing as /chat; streams token deltas as Server-Sent Events (SSE)."""
     cfg = load_config()
     session_id = (request.session_id or "default").strip() or "default"
-    history = request.history if request.history is not None else list(SESSION_HISTORY[session_id])
+    history = request.history or []
     
     # Retrieve documents to extract sources
     docs = _retrieve_rag_documents(cfg, request.question, k=5, history=history)
@@ -226,9 +286,6 @@ async def chat_with_report_stream(request: ChatRequest):
                         yield f"data: {json.dumps({'faithfulness': verdict})}\n\n"
             full = "".join(pieces)
             footer = faithfulness_footer_for_history(verdict)
-            SESSION_HISTORY[session_id].append(
-                {"user": request.question, "assistant": full + footer}
-            )
             # Send sources before [DONE]
             if sources:
                 yield f"data: {json.dumps({'sources': sources})}\n\n"
@@ -393,4 +450,5 @@ async def clear_database():
         cfg = load_config()
         return clear_all_data(cfg)
     except Exception as e:
-        return {"error": str(e)}
+        logger.exception("Clear DB error")
+        return JSONResponse({"error": str(e)}, status_code=500)

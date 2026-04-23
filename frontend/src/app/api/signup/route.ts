@@ -1,36 +1,21 @@
 import { NextResponse } from "next/server";
-
-const getBackendBaseUrls = () => {
-  const urls: string[] = [];
-  const envUrl = process.env.BACKEND_API_BASE_URL?.trim() || process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-
-  if (envUrl) {
-    urls.push(envUrl);
-  }
-
-  urls.push("http://127.0.0.1:8000", "http://localhost:8000");
-  return urls;
-};
+import { fetchFromBackend } from "@/lib/backend";
 
 export async function POST(req: Request) {
   const body = await req.json();
-  let upstreamResponse: Response | null = null;
+  let upstreamResponse: Response;
 
-  for (const baseUrl of getBackendBaseUrls()) {
-    try {
-      upstreamResponse = await fetch(`${baseUrl}/signup`, {
+  try {
+    upstreamResponse = await fetchFromBackend(
+      "/signup",
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        cache: "no-store",
-      });
-      break;
-    } catch {
-      // Try next backend base URL.
-    }
-  }
-
-  if (!upstreamResponse) {
+      },
+      15000
+    );
+  } catch {
     return NextResponse.json(
       { detail: "Backend unreachable. Start FastAPI server on port 8000." },
       { status: 503 }

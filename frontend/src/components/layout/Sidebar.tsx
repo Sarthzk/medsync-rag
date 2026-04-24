@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createClient } from "@/lib/supabase";
 
 const navItems = [
@@ -26,29 +26,17 @@ const navItems = [
   { name: "Vitals", icon: <Activity size={20} />, href: "/vitals" },
 ];
 
-export default function Sidebar({ onClose }: { onClose?: () => void }) {
+export default function Sidebar({
+  onClose,
+  userName = "Guest User",
+}: {
+  onClose?: () => void;
+  userName?: string;
+}) {
   const pathname = usePathname();
   const router = useRouter(); 
-  const [userName, setUserName] = useState("Guest User");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const supabase = createClient();
-
-  useEffect(() => {
-    const fetchUserName = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user?.user_metadata?.full_name) {
-          setUserName(user.user_metadata.full_name);
-        } else if (user?.email) {
-          setUserName(user.email.split("@")[0]);
-        }
-      } catch (err) {
-        console.error("Error fetching username:", err);
-      }
-    };
-
-    fetchUserName();
-  }, [supabase]);
 
   // Logout handler using Supabase
   const handleLogout = async () => {

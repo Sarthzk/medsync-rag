@@ -370,9 +370,11 @@ def _is_text_dense_pdf(text: str, page_count: int) -> bool:
     """
     if page_count <= 0:
         return False
-    non_ws_chars = len(re.sub(r"\s+", "", text or ""))
+    normalized_text = text or ""
+    non_ws_chars = len(re.sub(r"\s+", "", normalized_text))
+    word_count = len(re.findall(r"\b\w+\b", normalized_text))
     chars_per_page = non_ws_chars / page_count
-    return chars_per_page >= 120
+    return chars_per_page >= 30 and word_count >= 10
 
 
 def _extract_text_from_pdf(pdf_path: str) -> tuple[str, int]:
@@ -560,6 +562,28 @@ def _extract_structured_report_from_document(
         structured = _extract_structured_report_from_text(
             cfg, machine_text, source=Path(report_path).name
         )
+        if not any(
+            (
+                (structured.get("patient_name") or "").strip(),
+                (structured.get("report_date") or "").strip(),
+                (structured.get("report_type") or "").strip(),
+                structured.get("diagnoses") or [],
+                structured.get("medications") or [],
+                structured.get("lab_results") or [],
+                (structured.get("doctor_notes") or "").strip(),
+            )
+        ):
+            logger.info(
+                "Text-path structured extraction returned empty content for %s; falling back to vision.",
+                Path(report_path).name,
+            )
+            images = _rasterize_pdf_pages_to_images(report_path)
+            page_reports: list[dict] = []
+            for img in images:
+                b64 = _encode_pil_to_base64_jpeg(img)
+                page_reports.append(_extract_structured_report_from_image_b64_with_vision(cfg, b64))
+                img.close()
+            structured = _merge_structured_reports(page_reports)
     else:
         images = _rasterize_pdf_pages_to_images(report_path)
         page_reports: list[dict] = []

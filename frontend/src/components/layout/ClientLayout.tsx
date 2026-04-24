@@ -12,6 +12,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userName, setUserName] = useState("Guest User");
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const userRef = useRef<unknown>(null);
   const isAuthPageRef = useRef(false);
@@ -19,6 +20,16 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     supabaseRef.current = createClient();
   }
   const supabase = supabaseRef.current;
+
+  const deriveUserName = (user: { user_metadata?: { full_name?: string }; email?: string } | null) => {
+    if (user?.user_metadata?.full_name) {
+      return user.user_metadata.full_name;
+    }
+    if (user?.email) {
+      return user.email.split("@")[0];
+    }
+    return "Guest User";
+  };
   
   // Hide sidebar on Login and Signup pages
   const isAuthPage = pathname === "/login" || pathname === "/signup";
@@ -43,6 +54,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       try {
         const { data: { user } } = await supabase.auth.getUser();
         userRef.current = user;
+        setUserName(deriveUserName(user));
 
         if (!isMounted) return;
 
@@ -66,6 +78,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       userRef.current = session?.user ?? null;
+      setUserName(deriveUserName(session?.user ?? null));
 
       if (!session?.user && !isAuthPageRef.current) {
         router.push("/login");
@@ -131,14 +144,14 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           onClick={(e) => e.stopPropagation()}
           className="lg:hidden fixed left-0 top-0 bottom-0 w-72 z-40"
         >
-          <Sidebar onClose={() => setSidebarOpen(false)} />
+          <Sidebar onClose={() => setSidebarOpen(false)} userName={userName} />
         </motion.div>
       )}
 
       {/* Desktop Sidebar - Always Visible */}
       {!isAuthPage && (
         <div className="hidden lg:block fixed left-0 top-0 bottom-0 w-72 z-40">
-          <Sidebar onClose={() => setSidebarOpen(false)} />
+          <Sidebar onClose={() => setSidebarOpen(false)} userName={userName} />
         </div>
       )}
       

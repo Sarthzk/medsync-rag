@@ -320,6 +320,25 @@ async def latest_report():
         return {"error": str(e), "structured_report": None}
 
 
+async def _cleanup_orphaned_medication_reminders(filename: str) -> dict:
+    """
+    Removes medication reminders that reference a deleted report file.
+    Called after a report is deleted to keep the medication_reminders table clean.
+    """
+    try:
+        sb = _get_supabase()
+        
+        def _run():
+            # Delete all reminders where report_file matches the deleted filename
+            res = sb.table("medication_reminders").delete().eq("report_file", filename).execute()
+            return {"deleted_count": len(res.data or [])}
+        
+        return await run_in_threadpool(_run)
+    except Exception as e:
+        logger.warning(f"Failed to clean up medication reminders for {filename}: {e}")
+        return {"error": str(e)}
+
+
 @app.delete("/files/{filename}")
 async def delete_file(filename: str):
     """Deletes a file from uploads, vectors, and extraction cache."""
@@ -347,11 +366,15 @@ async def delete_file(filename: str):
             logger.warning(f"File deleted but vector deletion failed: {vector_result['error']}")
 
         cache_result = purge_report_cache(cfg, sha256=sha256)
+        
+        # Clean up orphaned medication reminders that referenced this deleted report
+        cleanup_result = await _cleanup_orphaned_medication_reminders(filename)
 
         return {
             "message": f"Successfully deleted {filename}",
             "vector_deleted": "error" not in vector_result,
             "cache_deleted": cache_result,
+            "medication_reminders_cleaned": cleanup_result.get("deleted_count", 0),
         }
     except Exception as e:
         logger.exception("File deletion error")
@@ -452,3 +475,4 @@ async def clear_database():
     except Exception as e:
         logger.exception("Clear DB error")
         return JSONResponse({"error": str(e)}, status_code=500)
+

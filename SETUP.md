@@ -1,253 +1,88 @@
-# 🏗️ MedSync Project Setup & Debug Report
+# MedSync — Setup & Deployment
 
-## ✅ Completed Tasks
+MedSync is two apps in one repo, deployed as **two Vercel projects** on the free (Hobby) plan:
 
-### 1. **Python Dependencies** ✓
-- Installed all required Python packages including:
-  - FastAPI & Uvicorn for backend server
-  - LangChain for RAG pipeline
-  - OpenAI for language models
-  - ChromaDB for vector storage
-  - Pillow & pillow-heif for image processing
-  - Python-multipart for file uploads
-  
-**Status:** All core dependencies installed and verified. Python venv set up with Python 3.14.
+| Part | Directory | Vercel project | Runtime |
+|---|---|---|---|
+| API (FastAPI + RAG) | `/` (entry `api/index.py`) | `medsync-api` | Python 3.12 function |
+| Web (Next.js) | `frontend/` | `medsync-web` | Next.js |
 
-### 2. **Frontend Dependencies** ✓
-- Installed all Node.js dependencies
-- Fixed 2 npm security vulnerabilities (Next.js update from 16.2.1 to 16.2.3)
-- All 368 packages audited and secured
-
-**Status:** Frontend dependencies resolved with zero security vulnerabilities.
-
-### 3. **Code Quality & Linting** ✓
-- Fixed TypeScript errors:
-  - Removed unused imports (Mail, MapPin, motion, etc.)
-  - Added proper TypeScript interfaces for type safety
-  - Fixed unescaped HTML entities in JSX
-  - Removed unused variables
-  - Fixed React hooks violations
-  - Updated Tailwind CSS utilities (rounded-[2rem] → rounded-3xl)
-
-- Python code analysis:
-  - 0 syntax errors in main.py
-  - 0 syntax errors in medsync_rag.py
-  - Code quality score: 9.05/10 (main.py)
-  - Minor style issues (line length, trailing whitespace) - non-critical
-
-**Status:** Codebase cleaned and error-free.
-
-### 4. **Project Testing** ✓
-- ✅ Frontend builds successfully (Next.js 16.2.3)
-- ✅ Backend modules import without errors
-- ✅ All 13 pages compile and generate correctly
-- ✅ Configuration system loads properly
-
-**Status:** Full project validation passed.
-
-### 5. **Cleanup & Optimization** ✓
-- Removed Python cache files (__pycache__, .pyc files)
-- Cleaned project structure
-- Updated python-multipart to v0.0.26
-- Created .env.example template for easy setup
-
-**Status:** Project is clean and optimized.
-
----
-
-## 🚀 Quick Start Guide
-
-### Prerequisites
-- Python 3.11+ (or 3.14+ if you have Homebrew)
-- Node.js 18+ (for npm)
-- OpenAI API key
-
-### Setup
-
-1. **Clone/Setup Environment:**
-   ```bash
-   cd /Users/sarthakmohite/Documents/Med-sync
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-
-2. **Configure Backend:**
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
-   ```
-
-3. **Setup Frontend:**
-   ```bash
-   cd frontend
-   npm install
-   npm run build  # Optional: to test build
-   ```
-
-4. **Start Backend:**
-   ```bash
-   # In root directory
-   source venv/bin/activate
-   python main.py
-   # Server will run on http://localhost:8000
-   ```
-
-5. **Start Frontend (in another terminal):**
-   ```bash
-   cd frontend
-   npm run dev
-   # Frontend will run on http://localhost:3000
-   ```
-
----
-
-## 📊 Project Architecture
-
-### Backend (Python)
-- **main.py** - FastAPI application with routes:
-  - `GET /` - Health check
-  - `POST /upload` - File upload & ingestion
-  - `POST /chat` - Ask questions about documents
-  - `POST /chat/stream` - Streaming responses
-  - `GET /files` - List uploaded files
-  - `POST /clear_db` - Clear all data
-
-- **medsync_rag.py** - RAG pipeline (1,575 lines):
-  - Document ingestion & structuring
-  - Vector embeddings with ChromaDB
-  - Conversational & retrieval routing
-  - Faithfulness checking
-  - Session management
-
-### Frontend (Next.js 16.2)
-- **Modular components:**
-  - `/app/page.tsx` - Home dashboard
-  - `/app/vault/page.tsx` - Document management
-  - `/app/analytics/page.tsx` - Health insights
-  - `/app/login/page.tsx` - Authentication
-  - `/app/profile/page.tsx` - User profile
-  - `/app/settings/page.tsx` - Preferences
-
-- **Components:**
-  - `Sidebar` - Navigation
-  - `ClientLayout` - App shell
-  - `QuickScan` - File upload widget
-  - `UploadModal` - Custom naming popup
-
----
-
-## 🔧 Troubleshooting
-
-### Backend Issues
-
-**Error: "OPENAI_API_KEY is not set"**
-- Create `.env` file in root directory
-- Add: `OPENAI_API_KEY=sk-...`
-
-**Error: "Address already in use" (port 8000)**
-- Change port: `uvicorn main:app --port 8001`
-
-**Error: "Backend unreachable"**
-- Ensure FastAPI server is running: `python main:app --reload`
-
-### Frontend Issues
-
-**Error: "Module not found"**
-- Run: `npm install`
-- Clear cache: `rm -rf node_modules/.cache`
-
-**Error: "Connection refused"**
-- Check backend is running on http://localhost:8000
-- Configure BASE_URL if using different port
-
----
-
-## 📋 File Structure
+All state lives in **Supabase**: Auth, Postgres + pgvector (report chunks), and a private
+Storage bucket (`reports`) for uploaded files. The API keeps nothing on local disk.
 
 ```
-Med-sync/
-├── main.py                         # FastAPI backend
-├── medsync_rag.py                  # RAG pipeline (1,575 lines)
-├── requirements.txt                # Python dependencies
-├── .env.example                    # Configuration template
-├── README.md                        # Project documentation
-├── CODEBASE_INDEX.md              # Codebase overview
-│
-├── frontend/                       # Next.js 16.2
-│   ├── package.json               # Node dependencies
-│   ├── next.config.ts             # Next.js config
-│   ├── tailwind.config.ts         # Tailwind CSS
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx           # Home
-│   │   │   ├── layout.tsx         # Root layout
-│   │   │   ├── globals.css        # Global styles
-│   │   │   ├── login/page.tsx
-│   │   │   ├── signup/page.tsx
-│   │   │   ├── profile/page.tsx
-│   │   │   ├── settings/page.tsx
-│   │   │   ├── vault/page.tsx
-│   │   │   ├── analytics/page.tsx
-│   │   │   ├── vitals/page.tsx
-│   │   │   └── api/               # API routes
-│   │   └── components/
-│   │       └── layout/            # UI components
-│   └── public/
-│
-├── medsync_db/                    # ChromaDB vector storage
-├── uploads/                       # User-uploaded files
-└── venv/                          # Python virtual environment
+Browser ──(Supabase JWT)──▶ Next.js /api/* proxy ──▶ FastAPI (Vercel function)
+   │                                                     │
+   └──── uploads file directly ──▶ Supabase Storage ◀────┤ downloads, extracts, embeds
+                                   Supabase Postgres ◀───┘ reports, report_chunks (pgvector), vitals
 ```
 
----
+## 1. Supabase (once)
 
-## ✨ Key Features Implemented
+1. Create a project at https://supabase.com (free tier is enough).
+2. SQL Editor → run `supabase/migrations/001_vercel_backend.sql`.
+3. Also run the table setups in `frontend/SUPABASE_SETUP.md` (`medication_reminders`)
+   and `frontend/SETTINGS_SETUP.md` (`user_settings`) if you haven't.
+4. Project Settings → API: note the **Project URL**, **anon key**, and **service_role key**.
 
-- **Secure Document Upload** - HEIC, PDF, PNG, JPG support
-- **RAG-Powered Q&A** - GPT-4o-mini with context awareness
-- **Vector Search** - ChromaDB with text-embedding-3-small
-- **Conversational Memory** - 5-turn context window
-- **Faithfulness Checking** - Verify answers against documents
-- **Modern UI** - Framer Motion + Tailwind CSS
-- **Session Management** - Per-user storage
-- **HIPAA Awareness** - Encryption & privacy-first design
+## 2. Local development
 
----
+Prerequisites: Python 3.12+, Node.js 20+, an OpenAI API key.
 
-## 🎯 Next Steps
+```bash
+# API
+python3 -m venv venv
+./venv/bin/pip install -r requirements-dev.txt
+cp .env.example .env          # fill in OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+./venv/bin/uvicorn main:app --reload --port 8000
 
-1. **Environment Setup:**
-   - Create `.env` with your OpenAI API key
-   - Verify Python and Node.js versions
+# Web (second terminal)
+cd frontend
+npm install
+cat > .env.local <<'ENV'
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+BACKEND_API_BASE_URL=http://localhost:8000
+ENV
+npm run dev                   # http://localhost:3000
+```
 
-2. **Local Testing:**
-   - Start backend: `python main.py`
-   - Start frontend: `npm run dev`
-   - Test upload on http://localhost:3000/vault
+Tests: `./venv/bin/pytest -q`
 
-3. **Production:**
-   - Deploy FastAPI (AWS Lambda, Railway, Render)
-   - Deploy Next.js (Vercel, Netlify)
-   - Set up persistent database (PostgreSQL for ChromaDB)
+## 3. Deploy to Vercel
 
-4. **Enhancements:**
-   - Add user authentication (JWT, OAuth)
-   - Implement database persistence
-   - Add multi-user support
-   - Configure production CORS
+### API project (`medsync-api`)
+1. Vercel → Add New → Project → import this repo.
+2. **Root Directory:** `/` (repo root). **Framework Preset:** Other.
+3. Environment Variables: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+   `CORS_ALLOW_ORIGINS` (your web URL), optional `COHERE_API_KEY`, `LOG_LEVEL`.
+4. Deploy, then check `https://<api>.vercel.app/` returns `{"status": ...}` and
+   `https://<api>.vercel.app/reports` returns **401**.
 
----
+### Web project (`medsync-web`)
+1. Import the same repo again as a second project.
+2. **Root Directory:** `frontend`. **Framework Preset:** Next.js.
+3. Environment Variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `BACKEND_API_BASE_URL=https://<api>.vercel.app`.
+4. Supabase → Authentication → URL Configuration: set Site URL / redirect URLs to the web URL.
 
-## 📝 Notes
+### Free-tier limits to keep in mind
+- Function request bodies are capped at 4.5 MB — that's why files go straight to Supabase Storage
+  (bucket limit: 20 MB per file).
+- Functions run for at most 300 s; very long scanned PDFs (many pages of vision extraction) can hit it.
+- Supabase free projects pause after a week of inactivity; open the dashboard to resume.
 
-- **Python Version:** Project uses Python 3.14 (installed via Homebrew)
-- **Node Version:** Next.js 16.2.3 (latest compatible)
-- **Dependencies:** All ~370 packages installed and audited
-- **Code Quality:** Project passes linting with 9/10 score
-- **Build Status:** ✅ Frontend and backend both build successfully
+## API reference
 
----
+All routes except `GET /` need `Authorization: Bearer <supabase access token>`.
 
-**Last Updated:** April 13, 2026
-**Status:** ✅ Production-Ready (with your OpenAI API key)
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Health check |
+| POST | `/reports/ingest` | `{storage_path, filename}` → extract, embed, index an uploaded file |
+| GET | `/reports` | List the user's reports (with signed preview URLs) |
+| GET | `/reports/latest` | Structured data of the newest processed report |
+| DELETE | `/reports/{id}` / `/reports` | Delete one / all of the user's reports |
+| POST | `/chat` | `{question, history}` → `{answer, sources}` |
+| POST | `/chat/stream` | Same, as SSE: `{t}`, `{sources}`, `{faithfulness}`, `{error}`, `[DONE]` |
+| GET/POST/DELETE | `/vitals`, `/vitals/{id}` | The user's vitals log |

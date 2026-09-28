@@ -1,4 +1,5 @@
 -r requirements.txt
 pytest
+pyflakes
 httpx
-uvicorn
+uvicorn[standard]

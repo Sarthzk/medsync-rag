@@ -1,0 +1,18 @@
+# Backend (medsync-api) deployment: ship only what the Python function needs.
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+supabase/
+docs/
+*.md
+.env
+.env.*
+medsync_db/
+medsync_db_fresh/
+uploads/
+.medsync_cache/
+frontend/node_modules/
+frontend/.next/

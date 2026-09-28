@@ -1,2 +1,3 @@
-from main import app as app
+"""Vercel serverless entrypoint: every request is rewritten here (see vercel.json)."""
 
+from main import app as app

@@ -1,31 +1,22 @@
 #
-# MedSync (FastAPI + RAG) production requirements
-# - Kept minimal for Vercel deployments (avoid pinning transitive deps)
-# - Versions are intentionally omitted unless needed for compatibility
+# MedSync API (FastAPI + RAG) runtime requirements.
+# Deployed as a Vercel Python function: keep this list small. All state lives in
+# Supabase (Postgres/pgvector + Storage), so no local vector DB is needed.
 #
 
 # API server
-fastapi
-uvicorn
+fastapi>=0.115,<1
+python-dotenv>=1.0,<2
 
-# Config / uploads
-python-dotenv
-python-multipart
-
-# Database (Vitals storage)
-supabase
+# Supabase (auth, database, storage)
+supabase>=2.10,<3
 
 # RAG pipeline
-langchain-core
-langchain-openai
-langchain-text-splitters
-langchain-chroma
-chromadb
+langchain-core>=0.3,<0.4
+langchain-openai>=0.3,<0.4
+langchain-text-splitters>=0.3,<0.4
 
 # Document / image processing
-pymupdf
-pillow
-pillow-heif
-
-# Compatibility: several ML/data packages in the ecosystem are not yet stable on NumPy 2.x
-numpy<2
+pymupdf>=1.24,<2
+pillow>=11,<13
+pillow-heif>=0.20,<2

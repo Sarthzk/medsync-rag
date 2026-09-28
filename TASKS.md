@@ -170,19 +170,20 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 ### Task 6: Vercel packaging for the backend
 **Files:** `vercel.json`, `.vercelignore`, `requirements.txt`, `api/index.py`, `README.md`/`SETUP.md`
 
-- [ ] `requirements.txt`: drop `chromadb`, `langchain-chroma`, `numpy<2`, `uvicorn` (keep uvicorn in `requirements-dev.txt`); keep
-      `fastapi, python-multipart, python-dotenv, supabase, langchain-core, langchain-openai, langchain-text-splitters, pymupdf, pillow, pillow-heif`; pin major versions.
-- [ ] `vercel.json`:
+- [x] `requirements.txt`: drop `chromadb`, `langchain-chroma`, `numpy<2`, `uvicorn`, `python-multipart` (keep uvicorn in `requirements-dev.txt`); keep
+      `fastapi, python-dotenv, supabase, langchain-core, langchain-openai, langchain-text-splitters, pymupdf, pillow, pillow-heif`; pin major versions.
+- [x] `vercel.json`:
       ```json
       {
         "functions": { "api/index.py": { "maxDuration": 300 } },
         "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
       }
       ```
-- [ ] `.vercelignore`: `frontend/`, `venv/`, `tests/`, `__pycache__/`, `*.md`, `medsync_db/`, `uploads/`, `.medsync_cache/`, `vitals.json`.
-- [ ] Delete `vitals.json`, root `__pycache__/`; docs: local run is `uvicorn main:app --reload`.
-- [ ] Verify locally: `pytest -q` green; `uvicorn main:app` starts; `curl localhost:8000/` → 200; `curl localhost:8000/reports` → 401.
-- [ ] Commit: `build: package FastAPI backend for Vercel`
+- [x] `.vercelignore` (not `frontend/` — keep the web project's root untouched): `venv/`, `tests/`, `__pycache__/`, `*.md`, `medsync_db/`, `uploads/`, `.medsync_cache/`, `vitals.json`.
+- [x] Delete `vitals.json`, root `__pycache__/`; docs: local run is `uvicorn main:app --reload`.
+- [x] Verify locally: `pytest -q` green; `uvicorn main:app` starts; `curl localhost:8000/` → 200; `curl localhost:8000/reports` → 401.
+- [x] Linux/py3.12 bundle measured at ~199 MB; 71 tests pass on 3.12.
+- [x] Commit: `build: package FastAPI backend for Vercel`
 
 ---
 

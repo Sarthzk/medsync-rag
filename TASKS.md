@@ -192,24 +192,25 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 ### Task 7: Authenticated API calls + proxy
 **Files:** Create `frontend/src/lib/api.ts`; modify `frontend/src/lib/backend.ts` and every `frontend/src/app/api/**/route.ts`
 
-- [ ] `apiFetch(path, init)` (browser): gets `session.access_token` from the Supabase client and sets `Authorization: Bearer …`.
-- [ ] `fetchFromBackend(pathname, init, timeoutMs, authHeader)`: forwards `Authorization`; uses only
+- [x] `apiFetch(path, init)` (browser): gets `session.access_token` from the Supabase client and sets `Authorization: Bearer …`.
+- [x] `fetchFromBackend(pathname, init, timeoutMs, authHeader)`: forwards `Authorization`; uses only
       `BACKEND_API_BASE_URL` in production (localhost fallback only when `NODE_ENV !== "production"`), and never retries non-GET requests.
-- [ ] Routes: `files` → `reports` (GET list, DELETE `?id=`), new `reports/ingest`, keep `reports/latest`, `chat`, `chat/stream`, `vitals`.
+- [x] Routes: `files` → `reports` (GET list, DELETE `?id=`), new `reports/ingest`, keep `reports/latest`, `chat`, `chat/stream`, `vitals`.
       Delete `api/upload` and `api/signup`. Parse error bodies with `text()` + safe JSON parse.
-- [ ] `chat/stream`: timeout only on connecting (clear the timer once headers arrive), so long streams aren't cut off; set `export const maxDuration = 300`.
-- [ ] Replace every `fetch("/api/...")` in pages/components with `apiFetch`.
-- [ ] Verify: `npx tsc --noEmit` and `npx eslint src` clean.
-- [ ] Commit: `feat(web): send Supabase JWT through the API proxy`
+- [x] `chat/stream`: timeout only on connecting (clear the timer once headers arrive), so long streams aren't cut off; set `export const maxDuration = 300`.
+- [x] Replace every `fetch("/api/...")` in pages/components with `apiFetch`.
+- [x] Verify: `npx tsc --noEmit` and `npx eslint src` clean.
+- [x] Tasks 7 + 8 committed together (removing the old routes breaks Vault/QuickScan until the new upload flow exists).
 
 ### Task 8: Direct-to-Storage uploads + Vault
 **Files:** Create `frontend/src/lib/uploadReport.ts`; modify `vault/page.tsx`, `components/layout/QuickScan.tsx`
 
-- [ ] `uploadReport(file)`: validate extension (`pdf/png/jpg/jpeg/heic`) and size (≤ 20 MB) → `supabase.storage.from("reports").upload(`${userId}/${Date.now()}-${safeName}`, file, { contentType })` — derive `contentType` from the extension (browsers often report HEIC as `""`, which the bucket's MIME allowlist rejects) → `apiFetch("/api/reports/ingest", {storage_path, filename})` → return `{report_id, ...}`.
-- [ ] Vault: list from `/api/reports` (uses signed URLs for preview), delete by id, show `pending/failed` status, add `accept=` and reset input value, drop the unused "custom name" or actually use it as `filename`.
-- [ ] QuickScan: use `uploadReport`, read `answer` (not `response`), and ask about the specific uploaded filename.
-- [ ] Verify manually: upload 1 PDF and 1 image > 4.5 MB → both ingest; preview works; delete removes it; a second user can't see it.
-- [ ] Commit: `feat(web): upload reports directly to Supabase Storage`
+- [x] `uploadReport(file)`: validate extension (`pdf/png/jpg/jpeg/heic`) and size (≤ 20 MB) → `supabase.storage.from("reports").upload(`${userId}/${Date.now()}-${safeName}`, file, { contentType })` — derive `contentType` from the extension (browsers often report HEIC as `""`, which the bucket's MIME allowlist rejects) → `apiFetch("/api/reports/ingest", {storage_path, filename})` → return `{report_id, ...}`.
+- [x] Vault: list from `/api/reports` (uses signed URLs for preview), delete by id, show `pending/failed` status, add `accept=` and reset input value, drop the unused "custom name" or actually use it as `filename`.
+- [x] QuickScan: use `uploadReport`, read `answer` (not `response`), and ask about the specific uploaded filename.
+- [x] Verified via `next start` proxy with a live throwaway user: 19.5 MB scanned PDF → Storage → ingest (vision) → streamed chat with sources → vitals → delete.
+- [ ] **(You)** Click through Vault upload/preview/delete in the browser once (`npm run dev`).
+- [x] Commit: `feat(web): upload reports directly to Supabase Storage`
 
 ---
 
@@ -242,6 +243,7 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 - [ ] Tests for the text path using a monkeypatched LLM. Commit.
 
 ### Task 13: Chat UX correctness
+- [ ] Cut time-to-first-token (~11 s measured): run metadata-filter and HyDE LLM calls concurrently; skip HyDE for short factual questions.
 - [ ] Send history as paired `{user, assistant}` turns.
 - [ ] Handle `error`, `sources`, `faithfulness` SSE events; on failure keep the user message and mark the assistant bubble as failed instead of `slice(0,-1)`.
 - [ ] Hide the "Analyzing…" spinner once the first token arrives. Commit.

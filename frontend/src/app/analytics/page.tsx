@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { FileText, AlertCircle, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -35,7 +36,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch("/api/reports/latest");
+        const res = await apiFetch("/api/reports/latest");
         const json = (await res.json()) as LatestReportResponse;
         setData(json);
       } catch {

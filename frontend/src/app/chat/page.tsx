@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useState, useRef, useLayoutEffect } from "react";
 import { Send, Loader2, FileText, AlertCircle, Zap, ChevronDown, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -265,7 +266,7 @@ export default function ChatPage() {
     setError(null);
 
     try {
-      const response = await fetch("/api/chat/stream", {
+      const response = await apiFetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -372,7 +373,7 @@ export default function ChatPage() {
     setError(null);
 
     try {
-      const res = await fetch("/api/reports/latest");
+      const res = await apiFetch("/api/reports/latest");
       const latestReport = (await res.json()) as LatestReportResponse;
 
       if (!res.ok || !latestReport.structured_report) {

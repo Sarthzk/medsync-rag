@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -104,7 +105,7 @@ export default function MedicationsPage() {
       setCurrentUser(user);
 
       const [reportResponse, remindersResponse] = await Promise.all([
-        fetch("/api/reports/latest"),
+        apiFetch("/api/reports/latest"),
         supabase
           .from("medication_reminders")
           .select("medication_key, medication_name, report_file, reminder_enabled")

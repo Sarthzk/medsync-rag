@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { Activity, Heart, Moon, Footprints, ArrowUpRight, Plus, X, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
@@ -127,7 +128,7 @@ export default function VitalsPage() {
 
   const fetchVitalLogs = async () => {
     try {
-      const res = await fetch("/api/vitals");
+      const res = await apiFetch("/api/vitals");
       if (res.ok) {
         const data = await res.json();
         setVitalLogs(data.logs || []);
@@ -155,7 +156,7 @@ export default function VitalsPage() {
         return;
       }
 
-      const res = await fetch("/api/vitals", {
+      const res = await apiFetch("/api/vitals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -178,7 +179,7 @@ export default function VitalsPage() {
 
   const handleDeleteLog = async (id: string) => {
     try {
-      const res = await fetch(`/api/vitals/${encodeURIComponent(id)}`, {
+      const res = await apiFetch(`/api/vitals/${encodeURIComponent(id)}`, {
         method: "DELETE",
       });
 

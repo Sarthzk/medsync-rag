@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { motion } from "framer-motion";
 import { Bell, ShieldCheck, Database, Trash2, Smartphone, Loader2, AlertCircle } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -154,10 +155,12 @@ export default function SettingsPage() {
   const handleDataExport = async () => {
     setIsExporting(true);
     try {
-      const response = await fetch("/api/files");
-      if (!response.ok) throw new Error("Failed to fetch files");
+      const response = await apiFetch("/api/reports");
+      if (!response.ok) throw new Error("Failed to fetch reports");
 
-      const { files } = await response.json();
+      const { reports } = (await response.json()) as {
+        reports?: Array<{ filename: string; status: string; created_at: string }>;
+      };
 
       const exportData = {
         exportDate: new Date().toISOString(),
@@ -166,7 +169,7 @@ export default function SettingsPage() {
           name: currentUser?.user_metadata?.full_name || "User",
         },
         settings: settings,
-        uploadedFiles: files || [],
+        uploadedFiles: (reports || []).map(({ filename, status, created_at }) => ({ filename, status, created_at })),
       };
 
       // Create and download JSON file

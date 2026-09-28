@@ -2,6 +2,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { ScanSearch, FileUp, Loader2, CheckCircle, ArrowRight, AlertCircle } from "lucide-react";
 import { useState, useRef } from "react";
+import { apiJson, readApiError } from "@/lib/api";
+import { REPORT_ACCEPT, uploadReport, validateReportFile } from "@/lib/uploadReport";
 
 interface AnalysisResult {
   filename: string;
@@ -18,9 +20,10 @@ export default function QuickScan() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
-    // Validate file type
-    if (!file.type.includes("pdf") && !file.type.includes("image")) {
-      setErrorMessage("Please upload a PDF or image file");
+    try {
+      validateReportFile(file);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Please upload a PDF or image file");
       setStatus("error");
       setTimeout(() => setStatus("idle"), 3000);
       return;
@@ -30,44 +33,28 @@ export default function QuickScan() {
     setErrorMessage("");
 
     try {
-      // Upload file
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const uploadResponse = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error("Upload failed");
-      }
+      const ingested = await uploadReport(file);
 
       setStatus("analyzing");
 
-      // Now analyze the document with a quick summary query
-      const analysisResponse = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: `Please provide a brief summary of this medical document. Include: (1) Main findings or diagnosis, (2) Key test results or measurements, (3) Recommended next steps or medications. Format your response with clear headers.`,
-          session_id: `quick-scan-${Date.now()}`,
-        }),
+      const analysisResponse = await apiJson("/api/chat", "POST", {
+        question:
+          `Please provide a brief summary of the medical report "${ingested.file}". Include: ` +
+          "(1) Main findings or diagnosis, (2) Key test results or measurements, " +
+          "(3) Recommended next steps or medications. Format your response with clear headers.",
+        session_id: `quick-scan-${Date.now()}`,
+        skip_faithfulness: true,
       });
 
       if (!analysisResponse.ok) {
-        const errorData = await analysisResponse.text();
-        console.error("Chat API error:", analysisResponse.status, errorData);
-        throw new Error(`Analysis failed (${analysisResponse.status}): ${errorData || "Unknown error"}`);
+        throw new Error(await readApiError(analysisResponse, `Analysis failed (${analysisResponse.status})`));
       }
 
-      const analysisData = await analysisResponse.json();
-      
-      // Parse the response to extract key information
-      const response = analysisData.response || "";
-      
+      const analysisData = (await analysisResponse.json()) as { answer?: string };
+      const response = analysisData.answer || "";
+
       setResult({
-        filename: file.name,
+        filename: ingested.file,
         summary: response,
         keyFindings: extractKeyPoints(response, "findings"),
         recommendations: extractKeyPoints(response, "recommendations|next steps"),
@@ -117,6 +104,8 @@ export default function QuickScan() {
     if (files && files[0]) {
       handleFile(files[0]);
     }
+    // Reset so selecting the same file again still fires onChange.
+    e.currentTarget.value = "";
   };
 
   const resetScan = () => {
@@ -152,7 +141,7 @@ export default function QuickScan() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,image/*"
+        accept={REPORT_ACCEPT}
         onChange={handleInputChange}
         className="hidden"
       />
@@ -209,7 +198,7 @@ export default function QuickScan() {
               <div className="bg-slate-50 rounded-xl p-4 space-y-3 text-left">
                 <div>
                   <p className="text-xs font-semibold text-[#1B4332] uppercase tracking-wide mb-2">Summary</p>
-                  <p className="text-sm text-slate-700 leading-relaxed">{result.summary.substring(0, 300)}...</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">{result.summary.length > 300 ? `${result.summary.slice(0, 300)}…` : result.summary}</p>
                 </div>
 
                 {result.keyFindings.length > 0 && (

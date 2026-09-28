@@ -204,7 +204,7 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 ### Task 8: Direct-to-Storage uploads + Vault
 **Files:** Create `frontend/src/lib/uploadReport.ts`; modify `vault/page.tsx`, `components/layout/QuickScan.tsx`
 
-- [ ] `uploadReport(file)`: validate extension (`pdf/png/jpg/jpeg/heic`) and size (≤ 20 MB) → `supabase.storage.from("reports").upload(`${userId}/${Date.now()}-${safeName}`, file)` → `apiFetch("/api/reports/ingest", {storage_path, filename})` → return `{report_id, ...}`.
+- [ ] `uploadReport(file)`: validate extension (`pdf/png/jpg/jpeg/heic`) and size (≤ 20 MB) → `supabase.storage.from("reports").upload(`${userId}/${Date.now()}-${safeName}`, file, { contentType })` — derive `contentType` from the extension (browsers often report HEIC as `""`, which the bucket's MIME allowlist rejects) → `apiFetch("/api/reports/ingest", {storage_path, filename})` → return `{report_id, ...}`.
 - [ ] Vault: list from `/api/reports` (uses signed URLs for preview), delete by id, show `pending/failed` status, add `accept=` and reset input value, drop the unused "custom name" or actually use it as `filename`.
 - [ ] QuickScan: use `uploadReport`, read `answer` (not `response`), and ask about the specific uploaded filename.
 - [ ] Verify manually: upload 1 PDF and 1 image > 4.5 MB → both ingest; preview works; delete removes it; a second user can't see it.

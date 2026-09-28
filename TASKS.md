@@ -160,12 +160,12 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 | POST | `/chat`, `/chat/stream` | pass `user.id`; stream forwards `sources`/`faithfulness`/`error` events |
 | GET/POST/DELETE | `/vitals…` | filtered by / stamped with `user_id`; `timestamp` from UTC; pydantic bounds (HR 20–250, sleep 0–24, steps 0–200000) |
 
-- [ ] Remove: `/upload` multipart, `/files`, `/view-reports` static mount, `/clear_db`, `UPLOAD_DIR`, favicon routes.
-- [ ] CORS: `allow_origins` from `CORS_ALLOW_ORIGINS` env (comma-separated), `allow_credentials=False`.
-- [ ] Errors: log full exception, return generic `{"error": "..."}` with proper 4xx/5xx — never `str(e)` for 5xx.
-- [ ] Blocking work (`ingest`, `answer_question`) wrapped in `run_in_threadpool`.
-- [ ] Tests: unauthenticated → 401 on every protected route; ingest with another user's path → 400; vitals validation → 422.
-- [ ] Commit: `feat(api): user-scoped routes, proper status codes`
+- [x] Remove: `/upload` multipart, `/files`, `/view-reports` static mount, `/clear_db`, `UPLOAD_DIR`, favicon routes.
+- [x] CORS: `allow_origins` from `CORS_ALLOW_ORIGINS` env (comma-separated), `allow_credentials=False`.
+- [x] Errors: log full exception, return generic `{"error": "..."}` with proper 4xx/5xx — never `str(e)` for 5xx.
+- [x] Blocking work (`ingest`, `answer_question`) wrapped in `run_in_threadpool`.
+- [x] Tests: unauthenticated → 401 on every protected route; ingest with another user's path → 400; vitals validation → 422.
+- [x] Commit: `feat(api): user-scoped routes, proper status codes`
 
 ### Task 6: Vercel packaging for the backend
 **Files:** `vercel.json`, `.vercelignore`, `requirements.txt`, `api/index.py`, `README.md`/`SETUP.md`

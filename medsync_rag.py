@@ -1,10 +1,12 @@
 """Core MedSync RAG pipeline module.
 
 This file implements:
-- config loading and environment handling
-- report ingestion (structured extraction + markdown for embeddings -> chunking -> vector storage)
+- config loading
+- report ingestion (structured extraction + markdown for embeddings -> chunking -> pgvector)
 - chat answering with conversational vs medical routing
-- full data clearing helpers
+
+The pipeline is stateless: files, extraction results and vectors all live in
+Supabase (see `medsync_store`), scoped by the authenticated user's id.
 """
 
 import base64
@@ -14,7 +16,6 @@ import json
 import logging
 import os
 import re
-import shutil
 from functools import lru_cache
 from datetime import UTC, datetime
 import urllib.error
@@ -23,11 +24,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Literal
 
-from dotenv import load_dotenv
 from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
-from langchain_chroma import Chroma
+import medsync_store as store
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -37,6 +37,8 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger("medsync")
+
+register_heif_opener()
 
 IntentLabel = Literal["RETRIEVAL", "GENERAL_MEDICAL", "CONVERSATIONAL"]
 
@@ -61,11 +63,6 @@ def _history_to_text(history: list[dict] | None, *, max_turns: int = 5) -> str:
 class MedSyncConfig:
     """Central runtime configuration for backend pipeline behavior."""
 
-    persist_dir: str = "./medsync_db"
-    collection_name: str = "medical_reports"
-    uploads_dir: str = "./uploads"
-    cache_dir: str = "./.medsync_cache"
-
     chat_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
 
@@ -89,16 +86,8 @@ def _truthy_env(name: str, default: str = "false") -> bool:
 
 
 def load_config() -> MedSyncConfig:
-    """Loads runtime config from environment and `.env` file."""
-    register_heif_opener()
-    # Ensure .env settings take precedence over stale exported shell vars.
-    load_dotenv(override=True)
-
+    """Loads runtime config from environment variables (`.env` is loaded by main.py)."""
     return MedSyncConfig(
-        persist_dir=os.getenv("MEDSYNC_CHROMA_DIR", "./medsync_db"),
-        collection_name=os.getenv("MEDSYNC_COLLECTION", "medical_reports"),
-        uploads_dir=os.getenv("MEDSYNC_UPLOAD_DIR", "./uploads"),
-        cache_dir=os.getenv("MEDSYNC_CACHE_DIR", "./.medsync_cache"),
         chat_model=os.getenv("MEDSYNC_CHAT_MODEL", "gpt-4o-mini"),
         embedding_model=os.getenv("MEDSYNC_EMBED_MODEL", "text-embedding-3-small"),
         llm_disabled=_truthy_env("MEDSYNC_LLM_DISABLED", "false"),
@@ -118,88 +107,24 @@ def require_openai_key() -> None:
         )
 
 
-def _sha256_bytes(data: bytes) -> str:
+ALLOWED_EXTENSIONS = (".png", ".jpg", ".jpeg", ".heic", ".pdf")
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".heic"}
+
+
+def sha256_bytes(data: bytes) -> str:
+    """Returns SHA256 hash for idempotent processing and caching."""
     return hashlib.sha256(data).hexdigest()
 
 
-def file_sha256(path: str) -> str:
-    """Returns SHA256 hash for idempotent processing and caching."""
-    p = Path(path)
-    data = p.read_bytes()
-    return _sha256_bytes(data)
-
-
-def get_structured_report(cfg: MedSyncConfig, report_path: str) -> dict:
-    """
-    Public helper: returns the structured report JSON for a given uploaded report.
-
-    Uses the same cached extraction as ingestion, and will regenerate extraction if
-    the cache is missing.
-    """
-    return _extract_structured_report_from_document(cfg, report_path)
-
-
-def get_latest_structured_report(cfg: MedSyncConfig) -> dict:
-    """
-    Returns the most recently modified report's structured data from the uploads dir.
-    """
-    uploads_dir = Path(cfg.uploads_dir)
-    if not uploads_dir.exists():
-        return {"error": "No uploads directory found.", "structured_report": None}
-
-    allowed = {".png", ".jpg", ".jpeg", ".heic", ".pdf"}
-    candidates = [p for p in uploads_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed]
-    if not candidates:
-        return {"error": "No reports uploaded yet.", "structured_report": None}
-
-    latest = max(candidates, key=lambda p: p.stat().st_mtime)
-    structured = get_structured_report(cfg, str(latest))
-    return {
-        "file": latest.name,
-        "modified_at": latest.stat().st_mtime,
-        "structured_report": structured,
-    }
-
-
-def purge_report_cache(cfg: MedSyncConfig, *, sha256: str) -> dict:
-    """
-    Deletes cached extraction artifacts for a report hash.
-    """
-    removed: list[str] = []
-    cache_dir = Path(cfg.cache_dir)
-    if not cache_dir.exists():
-        return {"removed": removed}
-
-    for suffix in (".vision.structured.json", ".pdf.structured.json"):
-        p = _cache_path(cfg, sha256, suffix)
-        try:
-            if p.exists():
-                p.unlink()
-                removed.append(p.name)
-        except Exception:
-            logger.warning("Failed to delete cache file %s", str(p), exc_info=True)
-
-    return {"removed": removed}
-
-
-def _cache_path(cfg: MedSyncConfig, key: str, suffix: str) -> Path:
-    """Builds/creates cache path under local cache directory."""
-    cache_dir = Path(cfg.cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{key}{suffix}"
-
-
-def _encode_image_to_base64_jpeg(image_path: str) -> str:
-    """Converts image to base64 JPEG payload for vision model input."""
+def _encode_image_to_base64_jpeg(data: bytes, filename: str) -> str:
+    """Converts image bytes to base64 JPEG payload for vision model input."""
     try:
-        with Image.open(image_path) as img:
+        with Image.open(io.BytesIO(data)) as img:
             buffer = io.BytesIO()
             img.convert("RGB").save(buffer, format="JPEG")
             return base64.b64encode(buffer.getvalue()).decode("utf-8")
     except UnidentifiedImageError as exc:
-        raise ValueError(
-            f"Uploaded file {Path(image_path).name} is not a valid image."
-        ) from exc
+        raise ValueError(f"Uploaded file {filename} is not a valid image.") from exc
 
 
 def _encode_pil_to_base64_jpeg(img: Image.Image) -> str:
@@ -377,12 +302,16 @@ def _is_text_dense_pdf(text: str, page_count: int) -> bool:
     return chars_per_page >= 30 and word_count >= 10
 
 
-def _extract_text_from_pdf(pdf_path: str) -> tuple[str, int]:
+def _open_pdf(data: bytes):
+    fitz_module = __import__("fitz")
+    return fitz_module.open(stream=data, filetype="pdf")
+
+
+def _extract_text_from_pdf(data: bytes) -> tuple[str, int]:
     """
     Extracts machine text from PDF pages using PyMuPDF.
     """
-    fitz_module = __import__("fitz")
-    with fitz_module.open(pdf_path) as doc:
+    with _open_pdf(data) as doc:
         pages: list[str] = []
         for page in doc:
             page_text = page.get_text("text") or ""
@@ -390,13 +319,13 @@ def _extract_text_from_pdf(pdf_path: str) -> tuple[str, int]:
         return "\n\n".join(pages).strip(), len(doc)
 
 
-def _rasterize_pdf_pages_to_images(pdf_path: str) -> list[Image.Image]:
+def _rasterize_pdf_pages_to_images(data: bytes) -> list[Image.Image]:
     """
     Renders PDF pages to PIL images for vision-based extraction.
     """
     fitz_module = __import__("fitz")
     images: list[Image.Image] = []
-    with fitz_module.open(pdf_path) as doc:
+    with _open_pdf(data) as doc:
         for page in doc:
             pix = page.get_pixmap(matrix=fitz_module.Matrix(2, 2), alpha=False)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -494,37 +423,8 @@ def _extract_structured_report_from_image_b64_with_vision(
     return structured_report
 
 
-def _extract_structured_report_from_image_with_vision(
-    cfg: MedSyncConfig, image_path: str
-) -> dict:
-    """
-    Extracts report content into a fixed JSON schema for consistent chunking/retrieval.
-    Cached by file hash so re-uploads don't re-bill.
-    """
-    require_openai_key()
-
-    file_hash = file_sha256(image_path)
-    cache_file = _cache_path(cfg, file_hash, ".vision.structured.json")
-    if cache_file.exists():
-        try:
-            payload = json.loads(cache_file.read_text(encoding="utf-8"))
-            cached = payload.get("structured_report")
-            if isinstance(cached, dict):
-                return _sanitize_structured_report(cached)
-        except Exception:
-            logger.warning("Vision cache read failed, regenerating.", exc_info=True)
-
-    b64 = _encode_image_to_base64_jpeg(image_path)
-    structured_report = _extract_structured_report_from_image_b64_with_vision(cfg, b64)
-    cache_file.write_text(
-        json.dumps({"structured_report": structured_report}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return structured_report
-
-
 def _extract_structured_report_from_document(
-    cfg: MedSyncConfig, report_path: str
+    cfg: MedSyncConfig, data: bytes, filename: str
 ) -> dict:
     """
     Document extraction entrypoint:
@@ -533,34 +433,22 @@ def _extract_structured_report_from_document(
       * text-based PDFs -> direct text extraction + structuring
       * scanned PDFs -> page rasterization + vision extraction per page
     """
-    ext = Path(report_path).suffix.lower()
-    if ext in {".png", ".jpg", ".jpeg", ".heic"}:
-        return _extract_structured_report_from_image_with_vision(cfg, report_path)
+    ext = Path(filename).suffix.lower()
+    if ext in _IMAGE_EXTENSIONS:
+        b64 = _encode_image_to_base64_jpeg(data, filename)
+        return _extract_structured_report_from_image_b64_with_vision(cfg, b64)
 
     if ext != ".pdf":
-        raise RuntimeError(f"Unsupported report extension: {ext}")
+        raise ValueError(f"Unsupported report extension: {ext}")
 
     try:
-        machine_text, page_count = _extract_text_from_pdf(report_path)
+        machine_text, page_count = _extract_text_from_pdf(data)
     except Exception as exc:
-        raise RuntimeError(
-            "PDF support requires PyMuPDF. Install dependency `pymupdf`."
-        ) from exc
-
-    file_hash = file_sha256(report_path)
-    cache_file = _cache_path(cfg, file_hash, ".pdf.structured.json")
-    if cache_file.exists():
-        try:
-            payload = json.loads(cache_file.read_text(encoding="utf-8"))
-            cached = payload.get("structured_report")
-            if isinstance(cached, dict):
-                return _sanitize_structured_report(cached)
-        except Exception:
-            logger.warning("PDF structured cache read failed, regenerating.", exc_info=True)
+        raise ValueError(f"Uploaded file {filename} is not a readable PDF.") from exc
 
     if _is_text_dense_pdf(machine_text, page_count):
         structured = _extract_structured_report_from_text(
-            cfg, machine_text, source=Path(report_path).name
+            cfg, machine_text, source=filename
         )
         if not any(
             (
@@ -575,29 +463,23 @@ def _extract_structured_report_from_document(
         ):
             logger.info(
                 "Text-path structured extraction returned empty content for %s; falling back to vision.",
-                Path(report_path).name,
+                filename,
             )
-            images = _rasterize_pdf_pages_to_images(report_path)
-            page_reports: list[dict] = []
-            for img in images:
-                b64 = _encode_pil_to_base64_jpeg(img)
-                page_reports.append(_extract_structured_report_from_image_b64_with_vision(cfg, b64))
-                img.close()
-            structured = _merge_structured_reports(page_reports)
+            structured = _extract_structured_report_from_pdf_pages_with_vision(cfg, data)
     else:
-        images = _rasterize_pdf_pages_to_images(report_path)
-        page_reports: list[dict] = []
-        for img in images:
-            b64 = _encode_pil_to_base64_jpeg(img)
-            page_reports.append(_extract_structured_report_from_image_b64_with_vision(cfg, b64))
-            img.close()
-        structured = _merge_structured_reports(page_reports)
+        structured = _extract_structured_report_from_pdf_pages_with_vision(cfg, data)
 
-    cache_file.write_text(
-        json.dumps({"structured_report": structured}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
     return structured
+
+
+def _extract_structured_report_from_pdf_pages_with_vision(cfg: MedSyncConfig, data: bytes) -> dict:
+    """Rasterizes each PDF page, runs vision extraction per page, and merges the results."""
+    page_reports: list[dict] = []
+    for img in _rasterize_pdf_pages_to_images(data):
+        b64 = _encode_pil_to_base64_jpeg(img)
+        page_reports.append(_extract_structured_report_from_image_b64_with_vision(cfg, b64))
+        img.close()
+    return _merge_structured_reports(page_reports)
 
 
 def _structured_report_to_markdown(structured_report: dict, *, source: str) -> str:
@@ -665,12 +547,10 @@ def _structured_report_to_markdown(structured_report: dict, *, source: str) -> s
     return "\n".join(lines).strip()
 
 
-def _pdf_to_markdown_pages(pdf_path: str) -> str:
+def _pdf_to_markdown_pages(data: bytes, filename: str) -> str:
     """Turns extractable PDF page text into markdown sections for embedding."""
-    fitz_module = __import__("fitz")
-    name = Path(pdf_path).name
-    parts: list[str] = [f"# Medical report ({name})", ""]
-    with fitz_module.open(pdf_path) as doc:
+    parts: list[str] = [f"# Medical report ({filename})", ""]
+    with _open_pdf(data) as doc:
         for i, page in enumerate(doc, start=1):
             page_text = (page.get_text("text") or "").strip()
             parts.append(f"## Page {i}")
@@ -680,110 +560,27 @@ def _pdf_to_markdown_pages(pdf_path: str) -> str:
     return "\n".join(parts).strip()
 
 
-def _build_rag_markdown_for_ingest(report_path: str, structured_report: dict) -> str:
+def _build_rag_markdown_for_ingest(data: bytes, filename: str, structured_report: dict) -> str:
     """
     Markdown body for vector search: text-dense PDFs use PyMuPDF text; otherwise
     structured fields rendered as markdown (same schema as UI metadata).
     """
-    path = Path(report_path)
-    ext = path.suffix.lower()
-    if ext != ".pdf":
-        return _structured_report_to_markdown(structured_report, source=path.name)
+    if Path(filename).suffix.lower() != ".pdf":
+        return _structured_report_to_markdown(structured_report, source=filename)
 
     try:
-        machine_text, page_count = _extract_text_from_pdf(report_path)
+        machine_text, page_count = _extract_text_from_pdf(data)
     except Exception:
         logger.warning("PDF markdown build failed; using structured markdown.", exc_info=True)
-        return _structured_report_to_markdown(structured_report, source=path.name)
+        return _structured_report_to_markdown(structured_report, source=filename)
 
     if _is_text_dense_pdf(machine_text, page_count):
-        return _pdf_to_markdown_pages(report_path)
-    return _structured_report_to_markdown(structured_report, source=path.name)
+        return _pdf_to_markdown_pages(data, filename)
+    return _structured_report_to_markdown(structured_report, source=filename)
 
 
-def _set_path_writable(path: Path) -> None:
-    """Makes a file or directory writable where possible."""
-    try:
-        mode = path.stat().st_mode
-        path.chmod(mode | 0o222)
-    except Exception:
-        pass
-
-
-def _ensure_persist_directory(cfg: MedSyncConfig) -> None:
-    """Ensures the Chroma persist directory exists and is writable."""
-    persist = Path(cfg.persist_dir)
-    persist.mkdir(parents=True, exist_ok=True)
-    _set_path_writable(persist)
-    if not os.access(persist, os.W_OK):
-        raise PermissionError(
-            f"Chroma persist directory {persist} is not writable. "
-            "Check that the directory exists and the current user has write permissions."
-        )
-
-
-def _is_readonly_db_error(exc: Exception) -> bool:
-    return "readonly" in str(exc).lower()
-
-
-def _is_chroma_config_corruption_error(exc: Exception) -> bool:
-    text = str(exc)
-    return "'_type'" in text or '"_type"' in text
-
-
-def get_vectorstore(cfg: MedSyncConfig) -> Chroma:
-    """
-    Single source of truth for Chroma config so ingest/query/main all agree.
-    """
-    _ensure_persist_directory(cfg)
-    embeddings = OpenAIEmbeddings(model=cfg.embedding_model)
-
-    def _build(persist_dir: str) -> Chroma:
-        return Chroma(
-            collection_name=cfg.collection_name,
-            persist_directory=persist_dir,
-            embedding_function=embeddings,
-        )
-
-    try:
-        return _build(cfg.persist_dir)
-    except Exception as exc:
-        if not _is_chroma_config_corruption_error(exc):
-            raise
-
-        logger.warning(
-            "Detected corrupted/incompatible Chroma metadata at %s; rebuilding local vector index.",
-            cfg.persist_dir,
-            exc_info=True,
-        )
-        _reset_vectorstore_directory(cfg)
-        try:
-            return _build(cfg.persist_dir)
-        except Exception as retry_exc:
-            if not _is_chroma_config_corruption_error(retry_exc):
-                raise
-
-            fallback_dir = f"{cfg.persist_dir}_fresh"
-            Path(fallback_dir).mkdir(parents=True, exist_ok=True)
-            logger.warning(
-                "Primary Chroma directory still corrupted after reset; using fallback directory %s.",
-                fallback_dir,
-                exc_info=True,
-            )
-            return _build(fallback_dir)
-
-
-def _reset_vectorstore_directory(cfg: MedSyncConfig) -> None:
-    """
-    Recreates the persisted Chroma directory when it becomes read-only/corrupted.
-    """
-    persist = Path(cfg.persist_dir)
-    if persist.exists():
-        _set_path_writable(persist)
-        for item in persist.rglob("*"):
-            _set_path_writable(item)
-        shutil.rmtree(persist, ignore_errors=True)
-    persist.mkdir(parents=True, exist_ok=True)
+def _embeddings(cfg: MedSyncConfig) -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(model=cfg.embedding_model)
 
 
 def _split_documents(docs: Iterable[Document]) -> list[Document]:
@@ -792,70 +589,66 @@ def _split_documents(docs: Iterable[Document]) -> list[Document]:
     return splitter.split_documents(list(docs))
 
 
-def ingest_medical_report(cfg: MedSyncConfig, image_path: str) -> dict:
+def ingest_report(cfg: MedSyncConfig, user_id: str, *, filename: str, storage_path: str) -> dict:
     """
-    Idempotent ingestion:
+    Ingests a report the user already uploaded to Supabase Storage.
+
     - Structured JSON is extracted for metadata (widgets, filters) and kept on each chunk.
+      Extraction is reused from an earlier report with identical content (sha256).
     - Markdown is built for embedding: text PDFs from PyMuPDF page text; images/scanned
       PDFs from structured fields rendered as markdown.
-    - content hash ensures same file doesn't create duplicates; chunk IDs are stable.
+    - Re-ingesting the same filename replaces its row and all of its chunks.
     """
-    p = Path(image_path)
-    if not p.exists():
-        raise FileNotFoundError(f"Report not found at {image_path}")
-
     require_openai_key()
 
-    file_hash = file_sha256(image_path)
-    filename = p.name
+    data = store.download_report(storage_path)
+    if not data:
+        raise ValueError("Uploaded file is empty.")
+    file_hash = sha256_bytes(data)
+    report = store.upsert_report(user_id, filename, storage_path, file_hash)
+    report_id = report["id"]
 
-    structured_report = _extract_structured_report_from_document(cfg, image_path)
-    extracted_metadata = _structured_report_metadata(structured_report)
-    structured_json = json.dumps(
-        structured_report, ensure_ascii=False, sort_keys=True, indent=2
-    )
-    if not structured_json.strip():
-        raise RuntimeError("Vision extraction returned empty structured content.")
-
-    markdown_body = _build_rag_markdown_for_ingest(image_path, structured_report)
-    if not markdown_body.strip():
-        raise RuntimeError("Could not build markdown content for indexing.")
-
-    base_doc = Document(
-        page_content=markdown_body,
-        metadata={
-            "source": filename,
-            "sha256": file_hash,
-            "type": "medical_report",
-            **extracted_metadata,
-        },
-    )
-    split_docs = _split_documents([base_doc])
-
-    # Stable IDs per chunk for safe upserts.
-    ids = [f"{file_hash}:{i}" for i in range(len(split_docs))]
-    vs = get_vectorstore(cfg)
     try:
-        vs.add_documents(split_docs, ids=ids)
-    except Exception as exc:
-        # Chroma can occasionally get into a readonly state on local sqlite.
-        # Recover once by recreating the persist directory and retrying.
-        if not _is_readonly_db_error(exc):
-            raise
-        logger.warning(
-            "Vectorstore is readonly; rebuilding local index directory and retrying once."
+        cached = store.get_report_by_sha(user_id, file_hash)
+        if cached and isinstance(cached.get("structured_report"), dict):
+            structured_report = _sanitize_structured_report(cached["structured_report"])
+        else:
+            structured_report = _extract_structured_report_from_document(cfg, data, filename)
+
+        extracted_metadata = _structured_report_metadata(structured_report)
+        markdown_body = _build_rag_markdown_for_ingest(data, filename, structured_report)
+        if not markdown_body.strip():
+            raise RuntimeError("Could not build markdown content for indexing.")
+
+        base_doc = Document(
+            page_content=markdown_body,
+            metadata={
+                "source": filename,
+                "sha256": file_hash,
+                "type": "medical_report",
+                **extracted_metadata,
+            },
         )
-        _reset_vectorstore_directory(cfg)
-        vs = get_vectorstore(cfg)
-        vs.add_documents(split_docs, ids=ids)
+        split_docs = _split_documents([base_doc])
+        vectors = _embeddings(cfg).embed_documents([d.page_content for d in split_docs])
+        chunk_count = store.replace_chunks(
+            user_id,
+            report_id,
+            [(d.page_content, d.metadata) for d in split_docs],
+            vectors,
+        )
+        store.set_report_result(report_id, status="ready", structured_report=structured_report)
+    except Exception as exc:
+        store.set_report_result(report_id, status="failed", error=str(exc)[:500])
+        raise
 
     return {
-        "status": "success",
+        "status": "ready",
+        "report_id": report_id,
         "file": filename,
         "sha256": file_hash,
-        "chunks": len(split_docs),
+        "chunks": chunk_count,
         "metadata": extracted_metadata,
-        "preview": markdown_body[:120],
     }
 
 
@@ -1115,7 +908,7 @@ def _build_metadata_filter(
     cfg: MedSyncConfig, question: str, *, history: list[dict] | None = None
 ) -> dict | None:
     """
-    Builds Chroma metadata filter from user query intent constraints.
+    Builds a chunk-metadata filter from user query intent constraints.
     """
     if cfg.llm_disabled:
         return None
@@ -1147,56 +940,37 @@ def _build_metadata_filter(
         ).content
         if not isinstance(raw, str):
             raw = str(raw)
-        parsed = json.loads(raw)
+        parsed = _extract_json_object(raw)
     except Exception:
         logger.warning("Metadata filter extraction failed; skipping pre-filter.", exc_info=True)
         return None
 
-    clauses: list[dict] = []
-    patient_name = _to_norm_token((parsed.get("patient_name") or "").strip())
+    # Flat {key: value} dict; matched by JSONB containment against chunk metadata.
+    filters: dict[str, str] = {}
+    patient_name = _to_norm_token(str(parsed.get("patient_name") or ""))
     if patient_name:
-        clauses.append({"patient_name_norm": patient_name})
+        filters["patient_name_norm"] = patient_name
 
-    report_type = _to_norm_token((parsed.get("report_type") or "").strip())
+    report_type = _to_norm_token(str(parsed.get("report_type") or ""))
     if report_type:
-        clauses.append({"report_type_norm": report_type})
+        filters["report_type_norm"] = report_type
 
-    date_scope = (parsed.get("date_scope") or "none").strip().lower()
+    date_scope = str(parsed.get("date_scope") or "none").strip().lower()
     now = datetime.now(UTC)
     if date_scope == "last_month":
-        clauses.append({"report_year_month": _previous_month_ym(now)})
+        filters["report_year_month"] = _previous_month_ym(now)
     elif date_scope == "this_month":
-        clauses.append({"report_year_month": now.strftime("%Y-%m")})
+        filters["report_year_month"] = now.strftime("%Y-%m")
     elif date_scope == "exact_month":
-        ym = (parsed.get("report_year_month") or "").strip()
+        ym = str(parsed.get("report_year_month") or "").strip()
         if re.fullmatch(r"\d{4}-\d{2}", ym):
-            clauses.append({"report_year_month": ym})
+            filters["report_year_month"] = ym
     elif date_scope == "exact_date":
-        rd = _normalize_report_date((parsed.get("report_date") or "").strip())
+        rd = _normalize_report_date(str(parsed.get("report_date") or "").strip())
         if rd:
-            clauses.append({"report_date": rd})
+            filters["report_date"] = rd
 
-    if not clauses:
-        return None
-    if len(clauses) == 1:
-        return clauses[0]
-    return {"$and": clauses}
-
-
-def _build_hybrid_retriever(
-    vs: Chroma, *, candidate_k: int, metadata_filter: dict | None = None
-):
-    """
-    Returns the semantic retriever from Chroma.
-
-    Note: A previous version attempted a BM25+semantic ensemble via optional LangChain
-    community modules. To keep the project simpler and more reliable to deploy, this
-    now always uses semantic retrieval only.
-    """
-    search_kwargs = {"k": candidate_k}
-    if metadata_filter:
-        search_kwargs["filter"] = metadata_filter
-    return vs.as_retriever(search_kwargs=search_kwargs)
+    return filters or None
 
 
 def _build_hyde_query(
@@ -1325,22 +1099,32 @@ def build_general_medical_chain(cfg: MedSyncConfig) -> Runnable:
 
 def _retrieve_rag_documents(
     cfg: MedSyncConfig,
+    user_id: str,
     question: str,
     *,
     k: int = 5,
     history: list[dict] | None = None,
 ) -> list[Document]:
-    """Hybrid retrieve + rerank for report-grounded answers."""
+    """Semantic retrieval (HyDE query, optional metadata pre-filter) + rerank, scoped to the user."""
     final_k = max(5, k)
     candidate_k = max(20, final_k)
-    vs = get_vectorstore(cfg)
     metadata_filter = _build_metadata_filter(cfg, question, history=history)
-    retriever = _build_hybrid_retriever(
-        vs, candidate_k=candidate_k, metadata_filter=metadata_filter
-    )
     retrieval_query = _build_hyde_query(cfg, question, history=history)
-    candidates = retriever.invoke(retrieval_query)
+    query_embedding = _embeddings(cfg).embed_query(retrieval_query)
+
+    candidates = store.match_chunks(
+        user_id, query_embedding, k=candidate_k, metadata_filter=metadata_filter
+    )
+    if not candidates and metadata_filter:
+        # An over-specific filter (e.g. a name spelled differently) shouldn't hide everything.
+        logger.info("Metadata filter matched nothing; retrying without it.")
+        candidates = store.match_chunks(user_id, query_embedding, k=candidate_k, metadata_filter=None)
     return _rerank_documents(question, candidates, top_n=final_k)
+
+
+def extract_sources(docs: list[Document]) -> list[str]:
+    """Unique, sorted source filenames of retrieved documents."""
+    return sorted({(d.metadata or {}).get("source") for d in docs} - {None, ""})
 
 
 def _sanitize_faithfulness_verdict(parsed: dict) -> dict:
@@ -1471,51 +1255,57 @@ def faithfulness_footer_for_history(verdict: dict | None) -> str:
     return "\n".join(lines)
 
 
+_NO_REPORT_CONTENT_MESSAGE = (
+    "I could not locate any uploaded report content related to your question. "
+    "Please make sure your report is uploaded and indexed, then try again."
+)
+
+
 def answer_question(
     cfg: MedSyncConfig,
+    user_id: str,
     question: str,
     *,
     k: int = 5,
     history: list[dict] | None = None,
     skip_faithfulness: bool = False,
-) -> str:
-    """Routes question to conversational, general-medical, or medical-RAG chain."""
+) -> dict:
+    """
+    Routes question to conversational, general-medical, or medical-RAG chain.
+    Returns {"answer": str, "sources": list[str]}; sources are empty unless reports were used.
+    """
     if not question or not question.strip():
-        return "Please ask a question."
+        return {"answer": "Please ask a question.", "sources": []}
 
+    hist = history or []
     intent = _classify_intent(cfg, question, history=history)
     if intent == "CONVERSATIONAL":
-        conv_chain = build_conversational_chain(cfg)
-        return conv_chain.invoke({"question": question, "history": history or []})
+        answer = build_conversational_chain(cfg).invoke({"question": question, "history": hist})
+        return {"answer": answer, "sources": []}
     if intent == "GENERAL_MEDICAL":
-        general_chain = build_general_medical_chain(cfg)
-        return general_chain.invoke({"question": question, "history": history or []})
+        answer = build_general_medical_chain(cfg).invoke({"question": question, "history": hist})
+        return {"answer": answer, "sources": []}
 
-    docs = _retrieve_rag_documents(cfg, question, k=k, history=history)
+    docs = _retrieve_rag_documents(cfg, user_id, question, k=k, history=history)
     if not docs:
-        return (
-            "I could not locate any uploaded report content related to your question. "
-            "Please make sure your report is uploaded and indexed, then try again."
-        )
-    chain = build_medical_answer_chain(cfg)
-    answer = chain.invoke({"question": question, "docs": docs, "history": history or []})
+        return {"answer": _NO_REPORT_CONTENT_MESSAGE, "sources": []}
+    sources = extract_sources(docs)
 
-    if (
-        skip_faithfulness
-        or cfg.llm_disabled
-        or cfg.faithfulness_disabled
-    ):
-        return _clean_response_formatting(answer)
+    answer = build_medical_answer_chain(cfg).invoke(
+        {"question": question, "docs": docs, "history": hist}
+    )
+    if skip_faithfulness or cfg.llm_disabled or cfg.faithfulness_disabled:
+        return {"answer": _clean_response_formatting(answer), "sources": sources}
 
-    context = _format_context(docs)
-    verdict = _verify_answer_faithfulness(cfg, question, context, answer)
+    verdict = _verify_answer_faithfulness(cfg, question, _format_context(docs), answer)
     footer = faithfulness_footer_for_history(verdict)
     final_answer = answer + footer if footer else answer
-    return _clean_response_formatting(final_answer)
+    return {"answer": _clean_response_formatting(final_answer), "sources": sources}
 
 
 def iter_chat_stream_events(
     cfg: MedSyncConfig,
+    user_id: str,
     question: str,
     *,
     k: int = 5,
@@ -1523,8 +1313,10 @@ def iter_chat_stream_events(
     skip_faithfulness: bool = False,
 ) -> Iterator[dict]:
     """
-    Yields {"event": "token", "text": str} for streamed output, and after report-grounded
-    LLM answers optionally {"event": "faithfulness", "payload": dict}.
+    Yields events for a streamed answer:
+    - {"event": "token", "text": str} for output deltas
+    - {"event": "sources", "sources": list[str]} once report chunks are retrieved
+    - {"event": "faithfulness", "payload": dict} after report-grounded LLM answers (optional)
     """
     if not question or not question.strip():
         yield {"event": "token", "text": "Please ask a question."}
@@ -1533,80 +1325,42 @@ def iter_chat_stream_events(
     intent = _classify_intent(cfg, question, history=history)
     hist = history or []
 
-    if intent == "CONVERSATIONAL":
+    if intent in ("CONVERSATIONAL", "GENERAL_MEDICAL"):
         if cfg.llm_disabled:
-            yield {
-                "event": "token",
-                "text": (
-                    "Hi! I can chat normally and also help with your uploaded medical reports. "
-                    "Ask me anything, or ask report-specific questions like medications, diagnosis, or dates."
-                ),
-            }
+            chain = (
+                build_conversational_chain(cfg)
+                if intent == "CONVERSATIONAL"
+                else build_general_medical_chain(cfg)
+            )
+            yield {"event": "token", "text": chain.invoke({"question": question, "history": hist})}
             return
+        build_messages = (
+            _conversational_messages if intent == "CONVERSATIONAL" else _general_medical_messages
+        )
         llm = ChatOpenAI(
             model=cfg.chat_model,
             temperature=cfg.temperature,
             max_tokens=cfg.max_conversational_tokens,
             streaming=True,
         )
-        for t in _iter_llm_stream_tokens(
-            llm, _conversational_messages({"question": question, "history": hist})
-        ):
+        for t in _iter_llm_stream_tokens(llm, build_messages({"question": question, "history": hist})):
             yield {"event": "token", "text": t}
         return
 
-    if intent == "GENERAL_MEDICAL":
-        if cfg.llm_disabled:
-            yield {
-                "event": "token",
-                "text": (
-                    "General medical mode is unavailable while budget mode is enabled. "
-                    "Ask about uploaded reports, or disable MEDSYNC_LLM_DISABLED."
-                ),
-            }
-            return
-        llm = ChatOpenAI(
-            model=cfg.chat_model,
-            temperature=cfg.temperature,
-            max_tokens=cfg.max_conversational_tokens,
-            streaming=True,
-        )
-        for t in _iter_llm_stream_tokens(
-            llm, _general_medical_messages({"question": question, "history": hist})
-        ):
-            yield {"event": "token", "text": t}
-        return
-
-    docs = _retrieve_rag_documents(cfg, question, k=k, history=history)
+    docs = _retrieve_rag_documents(cfg, user_id, question, k=k, history=history)
     if not docs:
-        yield {
-            "event": "token",
-            "text": (
-                "I could not locate any uploaded report content related to your question. "
-                "Please make sure your report is uploaded and indexed, then try again."
-            ),
-        }
+        yield {"event": "token", "text": _NO_REPORT_CONTENT_MESSAGE}
         return
-    inp = {"question": question, "docs": docs, "history": hist}
-
-    if cfg.llm_disabled:
-        if not docs:
-            yield {
-                "event": "token",
-                "text": "No relevant documents found. Please upload a medical report first.",
-            }
-        else:
-            context = _format_context(docs)
-            yield {
-                "event": "token",
-                "text": (
-                    "Budget mode is enabled (no AI generation).\n\n"
-                    f"Relevant context:\n{context}"
-                ),
-            }
-        return
+    yield {"event": "sources", "sources": extract_sources(docs)}
 
     context = _format_context(docs)
+    if cfg.llm_disabled:
+        yield {
+            "event": "token",
+            "text": f"Budget mode is enabled (no AI generation).\n\nRelevant context:\n{context}",
+        }
+        return
+
     llm = ChatOpenAI(
         model=cfg.chat_model,
         temperature=cfg.temperature,
@@ -1614,6 +1368,7 @@ def iter_chat_stream_events(
         streaming=True,
     )
     pieces: list[str] = []
+    inp = {"question": question, "docs": docs, "history": hist}
     for t in _iter_llm_stream_tokens(llm, _medical_rag_messages(inp)):
         pieces.append(t)
         yield {"event": "token", "text": t}
@@ -1621,78 +1376,6 @@ def iter_chat_stream_events(
     if skip_faithfulness or cfg.faithfulness_disabled:
         return
 
-    full = "".join(pieces)
-    verdict = _verify_answer_faithfulness(cfg, question, context, full)
+    verdict = _verify_answer_faithfulness(cfg, question, context, "".join(pieces))
     if verdict is not None:
         yield {"event": "faithfulness", "payload": verdict}
-
-
-def stream_answer_question(
-    cfg: MedSyncConfig,
-    question: str,
-    *,
-    k: int = 5,
-    history: list[dict] | None = None,
-    skip_faithfulness: bool = False,
-) -> Iterator[str]:
-    """
-    Token stream only (no faithfulness events). Prefer iter_chat_stream_events for /chat/stream.
-    """
-    for evt in iter_chat_stream_events(
-        cfg, question, k=k, history=history, skip_faithfulness=skip_faithfulness
-    ):
-        if evt.get("event") == "token":
-            yield evt.get("text") or ""
-
-
-def delete_document_by_filename(cfg: MedSyncConfig, filename: str) -> dict:
-    """
-    Deletes all vector chunks associated with a specific source filename from the vectorstore.
-    """
-    try:
-        _ensure_persist_directory(cfg)
-        vs = get_vectorstore(cfg)
-        
-        # Delete all documents with this source in metadata
-        vs._collection.delete(where={"source": {"$eq": filename}})
-        
-        logger.info(f"Deleted vector chunks for {filename}")
-        return {"message": f"Deleted {filename} from vector database"}
-    except Exception as e:
-        logger.exception(f"Failed to delete {filename} from vectorstore")
-        return {"error": str(e)}
-
-
-def clear_all_data(cfg: MedSyncConfig) -> dict:
-    """
-    Clears both vectorstore and uploaded files.
-    """
-    _ensure_persist_directory(cfg)
-    vs = get_vectorstore(cfg)
-
-    # Best-effort wipe of the collection. Chroma supports delete with no filter in most builds;
-    # fall back to removing the persisted directory if needed.
-    try:
-        vs._collection.delete(where={})
-    except Exception:
-        logger.warning("Vector collection delete failed; removing persisted directory.", exc_info=True)
-        persist = Path(cfg.persist_dir)
-        if persist.exists():
-            _set_path_writable(persist)
-            for child in persist.iterdir():
-                _set_path_writable(child)
-                if child.is_file():
-                    child.unlink()
-                else:
-                    shutil.rmtree(child)
-
-    upload_dir = Path(cfg.uploads_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    removed = 0
-    for f in upload_dir.iterdir():
-        if f.is_file():
-            f.unlink()
-            removed += 1
-
-    return {"message": "Clear successful", "deleted_uploads": removed}
-

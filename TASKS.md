@@ -129,21 +129,21 @@ Contents (run once in Supabase Dashboard → SQL Editor):
 ### Task 4: Rewire `medsync_rag.py` onto the store
 **Files:** Modify `medsync_rag.py`, `tests/test_rag_pure.py`
 
-- [ ] Remove: Chroma imports, `get_vectorstore`, `_reset_vectorstore_directory`, `_ensure_persist_directory`,
+- [x] Remove: Chroma imports, `get_vectorstore`, `_reset_vectorstore_directory`, `_ensure_persist_directory`,
       `_set_path_writable`, `_cache_path`, disk cache reads/writes, `purge_report_cache`, `clear_all_data`,
       `delete_document_by_filename`, `get_latest_structured_report`, `persist_dir/uploads_dir/cache_dir` config fields.
-- [ ] Extraction functions take `(cfg, data: bytes, filename: str)` instead of a path (PyMuPDF: `fitz.open(stream=data, filetype="pdf")`; PIL: `Image.open(io.BytesIO(data))`).
-- [ ] New `ingest_report(cfg, user_id, report_row) -> dict`: download bytes → reuse `structured_report` from
+- [x] Extraction functions take `(cfg, data: bytes, filename: str)` instead of a path (PyMuPDF: `fitz.open(stream=data, filetype="pdf")`; PIL: `Image.open(io.BytesIO(data))`).
+- [x] New `ingest_report(cfg, user_id, *, filename, storage_path) -> dict`: download bytes → sha256 → `upsert_report` → reuse `structured_report` from
       `get_report_by_sha` if present → else extract → build markdown → split → embed with `OpenAIEmbeddings.embed_documents`
       → `replace_chunks` → `set_report_result(status="ready")`; on exception `status="failed"` + message.
-- [ ] `_retrieve_rag_documents(cfg, user_id, question, *, k, history)` embeds the HyDE query and calls `match_chunks`;
+- [x] `_retrieve_rag_documents(cfg, user_id, question, *, k, history)` embeds the HyDE query and calls `match_chunks`;
       if a metadata filter returns 0 docs, retry once **without** the filter.
-- [ ] `answer_question` / `iter_chat_stream_events` take `user_id`, retrieve **once**, and return/emit the `sources`
+- [x] `answer_question` / `iter_chat_stream_events` take `user_id`, retrieve **once**, and return/emit the `sources`
       themselves (stream: `{"event": "sources", ...}`), so `main.py` no longer retrieves separately.
-- [ ] `load_config()` no longer calls `load_dotenv(override=True)`; `.env` loaded once in `main.py` with `override=False`.
-- [ ] Tests: `_is_text_dense_pdf`, `_normalize_report_date`, `_structured_report_to_markdown`, `_extract_json_object`
+- [x] `load_config()` no longer calls `load_dotenv(override=True)`; `.env` loaded once in `main.py` with `override=False`.
+- [x] Tests: `_is_text_dense_pdf`, `_normalize_report_date`, `_structured_report_to_markdown`, `_extract_json_object`
       with fenced JSON, metadata-filter parsing uses `_extract_json_object`.
-- [ ] Commit: `refactor(rag): stateless pipeline on Supabase`
+- [x] Commit: `refactor(rag): stateless pipeline on Supabase`
 
 ### Task 5: Rewrite `main.py` routes
 **Files:** Modify `main.py`, `tests/test_routes.py` (FastAPI `TestClient` with auth + store monkeypatched)

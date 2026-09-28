@@ -52,13 +52,13 @@ Storage), Next.js 16, Vercel Hobby.
 ## Phase 0 — Setup
 
 ### Task 0: Branch + test harness
-- [ ] Deal with the stray `frontend/package-lock.json` change (commit or `git checkout` it).
-- [ ] `git checkout -b vercel-migration`
-- [ ] Add `pytest` to a new `requirements-dev.txt` (`-r requirements.txt` + `pytest`), install into `venv`.
-- [ ] Create `tests/__init__.py` (empty) and `tests/conftest.py` that sets dummy env vars
+- [x] Deal with the stray `frontend/package-lock.json` change (commit or `git checkout` it).
+- [x] `git checkout -b vercel-migration`
+- [x] Add `pytest` to a new `requirements-dev.txt` (`-r requirements.txt` + `pytest`), install into `venv`.
+- [x] Create `tests/__init__.py` (empty) and `tests/conftest.py` that sets dummy env vars
       (`OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) so imports never need real secrets.
-- [ ] Verify: `./venv/bin/pytest -q` runs (0 tests collected is fine).
-- [ ] Commit: `chore: add pytest harness`
+- [x] Verify: `./venv/bin/pytest -q` runs (0 tests collected is fine).
+- [x] Commit: `chore: add pytest harness`
 
 ---
 
@@ -85,9 +85,9 @@ Contents (run once in Supabase Dashboard → SQL Editor):
 - Storage: private bucket `reports`; policies letting an authenticated user `insert/select/delete` objects only where
   `(storage.foldername(name))[1] = auth.uid()::text`.
 
-- [ ] Write the SQL file.
+- [x] Write the SQL file.
 - [ ] **(You)** Run it in the Supabase SQL editor; confirm tables, the `reports` bucket and the function exist.
-- [ ] Commit: `feat(db): pgvector + storage schema for serverless backend`
+- [x] Commit: `feat(db): pgvector + storage schema for serverless backend`
 
 ### Task 2: Backend auth dependency
 **Files:** Create `medsync_auth.py`, `tests/test_auth.py`
@@ -100,10 +100,10 @@ Contents (run once in Supabase Dashboard → SQL Editor):
   asymmetric Supabase keys, no JWT secret needed); raises 401 on failure.
 - `def get_supabase() -> Client` — cached service-role client (moved out of `main.py`).
 
-- [ ] Tests first (`parse_bearer_token`: missing → 401, `"Basic x"` → 401, `"Bearer "` → 401, `"Bearer abc"` → `"abc"`,
+- [x] Tests first (`parse_bearer_token`: missing → 401, `"Basic x"` → 401, `"Bearer "` → 401, `"Bearer abc"` → `"abc"`,
       case-insensitive scheme; `get_current_user` with a monkeypatched client: valid → `AuthUser`, error → 401).
-- [ ] Run → fail. Implement. Run → pass.
-- [ ] Commit: `feat(api): Supabase JWT auth dependency`
+- [x] Run → fail. Implement. Run → pass.
+- [x] Commit: `feat(api): Supabase JWT auth dependency`
 
 ### Task 3: Supabase data-access layer (`medsync_store.py`)
 **Files:** Create `medsync_store.py`, `tests/test_store.py`

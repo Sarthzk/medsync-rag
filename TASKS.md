@@ -86,7 +86,7 @@ Contents (run once in Supabase Dashboard → SQL Editor):
   `(storage.foldername(name))[1] = auth.uid()::text`.
 
 - [x] Write the SQL file.
-- [ ] **(You)** Run it in the Supabase SQL editor; confirm tables, the `reports` bucket and the function exist.
+- [x] **(You)** Run it in the Supabase SQL editor; confirm tables, the `reports` bucket and the function exist.
 - [x] Commit: `feat(db): pgvector + storage schema for serverless backend`
 
 ### Task 2: Backend auth dependency
@@ -121,10 +121,10 @@ Contents (run once in Supabase Dashboard → SQL Editor):
 - `delete_report(user_id, report_id) -> dict` — removes storage object, report row (chunks cascade), and the user's `medication_reminders` rows for that filename
 - `delete_all_for_user(user_id) -> dict`
 
-- [ ] Tests first for the pure pieces: `assert_owned_path` (own path ok; other user's path, `../`, absolute path → ValueError),
+- [x] Tests first for the pure pieces: `assert_owned_path` (own path ok; other user's path, `../`, absolute path → ValueError),
       and `match_chunks` row→`Document` mapping using a fake client.
-- [ ] Implement; tests pass.
-- [ ] Commit: `feat(api): Supabase storage + pgvector data layer`
+- [x] Implement; tests pass.
+- [x] Commit: `feat(api): Supabase storage + pgvector data layer`
 
 ### Task 4: Rewire `medsync_rag.py` onto the store
 **Files:** Modify `medsync_rag.py`, `tests/test_rag_pure.py`

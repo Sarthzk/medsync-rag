@@ -5,8 +5,6 @@ import {
   Droplets, 
   Shield, 
   Calendar, 
-  Edit3, 
-  Camera,
   Loader2
 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
@@ -15,6 +13,7 @@ interface Profile {
   name: string;
   email: string;
   bloodType: string;
+  memberSince: string;
   isLoading: boolean;
   error: string | null;
 }
@@ -24,6 +23,7 @@ export default function ProfilePage() {
     name: "Loading...",
     email: "Loading...",
     bloodType: "...",
+    memberSince: "...",
     isLoading: true,
     error: null,
   });
@@ -48,7 +48,10 @@ export default function ProfilePage() {
         setProfile({
           name: user.user_metadata?.full_name || user.email?.split("@")[0] || "User",
           email: user.email || "No email provided",
-          bloodType: user.user_metadata?.blood_type || "O+",
+          bloodType: user.user_metadata?.blood_type || "Not set",
+          memberSince: user.created_at
+            ? new Date(user.created_at).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" })
+            : "Unknown",
           isLoading: false,
           error: null,
         });
@@ -79,9 +82,6 @@ export default function ProfilePage() {
                 profile.name.charAt(0).toUpperCase()
               )}
             </div>
-            <button className="absolute -bottom-2 -right-2 p-2.5 bg-white rounded-xl shadow-lg border border-slate-100 text-[#1B4332] hover:scale-110 transition-transform">
-              <Camera size={18} />
-            </button>
           </div>
 
           <div className="text-center md:text-left space-y-2">
@@ -89,9 +89,6 @@ export default function ProfilePage() {
               {profile.isLoading ? "Loading..." : profile.name}
             </h1>
             <div className="flex flex-wrap justify-center md:justify-start gap-3">
-              <span className="px-4 py-1.5 bg-[#1B4332]/5 text-[#1B4332] rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-                <Shield size={12} /> Verified Patient
-              </span>
               <span className="px-4 py-1.5 bg-[#FFB4A2]/10 text-[#FFB4A2] rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2">
                 <Droplets size={12} /> Blood Group: {profile.bloodType}
               </span>
@@ -99,9 +96,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <button className="flex items-center gap-2 px-6 py-3 bg-[#1B4332] text-white rounded-2xl font-bold text-sm hover:opacity-90 transition-all shadow-lg shadow-green-900/20 active:scale-95">
-          <Edit3 size={18} /> Edit Profile
-        </button>
       </div>
 
       {/* INFORMATION GRID */}
@@ -132,13 +126,13 @@ export default function ProfilePage() {
               </div>
 
               <div className="space-y-1">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Phone Number</p>
-                <p className="text-lg font-semibold text-[#1B4332]">+91 ••••• ••••</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Blood Group</p>
+                <p className="text-lg font-semibold text-[#1B4332]">{profile.isLoading ? "Loading..." : profile.bloodType}</p>
               </div>
 
               <div className="space-y-1">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Location</p>
-                <p className="text-lg font-semibold text-[#1B4332]">Maharashtra, India</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Member Since</p>
+                <p className="text-lg font-semibold text-[#1B4332]">{profile.isLoading ? "Loading..." : profile.memberSince}</p>
               </div>
             </div>
           </div>
@@ -155,7 +149,7 @@ export default function ProfilePage() {
                 <div className="w-2 h-2 rounded-full bg-[#FFB4A2]" />
                 <div className="flex-1">
                   <p className="text-sm font-bold">Account Created</p>
-                  <p className="text-[10px] text-white/60">Successfully joined MedSync</p>
+                  <p className="text-[10px] text-white/60">{profile.memberSince}</p>
                 </div>
               </div>
             </div>
@@ -163,10 +157,10 @@ export default function ProfilePage() {
 
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-4">
             <p className="text-sm font-medium text-slate-400">
-              Your data is encrypted using 256-bit AES technology and is HIPAA compliant.
+              Your reports are stored in a private folder that only your account can access, and every request is checked against your sign-in.
             </p>
             <div className="flex items-center gap-2 text-[#2D6A4F] font-bold text-xs uppercase tracking-tighter">
-              <Shield size={14} /> Secured by MedSync
+              <Shield size={14} /> Private to your account
             </div>
           </div>
         </div>

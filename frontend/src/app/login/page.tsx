@@ -124,7 +124,7 @@ export default function LoginPage() {
 
           <div className="flex items-center gap-2 justify-center opacity-40 pt-4">
             <ShieldCheck size={14} className="text-[#1B4332]" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#1B4332]">HIPAA Compliant Security</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#1B4332]">Private to your account</span>
           </div>
         </motion.div>
       </div>

@@ -420,7 +420,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="h-screen bg-[#FDFDFB] flex flex-col">
+    <div className="h-dvh bg-[#FDFDFB] flex flex-col">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 p-4 sm:p-6 shadow-sm">
         <div className="max-w-6xl mx-auto">
@@ -618,7 +618,7 @@ export default function ChatPage() {
                 </button>
               </form>
               <p className="text-[10px] sm:text-xs text-slate-400 mt-2 sm:mt-3 text-center">
-                Your conversations are encrypted and private. Responses are based on your uploaded documents.
+                Answers are based on your uploaded documents and are not a substitute for medical advice.
               </p>
             </div>
           </div>

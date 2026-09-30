@@ -33,6 +33,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   
   // Hide sidebar on Login and Signup pages
   const isAuthPage = pathname === "/login" || pathname === "/signup";
+  // Chat is a full-height app view; a footer below it would push its header off-screen.
+  const hideFooter = pathname === "/chat";
   isAuthPageRef.current = isAuthPage;
   
   // Close sidebar on Escape key
@@ -159,7 +161,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         <main className="flex-1 w-full">
           {children}
         </main>
-        <Footer />
+        {!hideFooter && <Footer />}
       </div>
     </div>
   );

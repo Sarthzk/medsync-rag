@@ -1,7 +1,7 @@
 "use client";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, readApiError } from "@/lib/api";
 import { motion } from "framer-motion";
-import { Bell, ShieldCheck, Database, Trash2, Smartphone, Loader2, AlertCircle } from "lucide-react";
+import { Bell, Database, Trash2, Smartphone, Loader2, AlertCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
@@ -87,38 +87,6 @@ export default function SettingsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Save AI Analysis setting
-  const handleAiAnalysisToggle = async () => {
-    const newValue = !settings.ai_analysis_enabled;
-    setIsSaving(true);
-
-    try {
-      const { error } = await supabase
-        .from("user_settings")
-        .upsert(
-          {
-            user_id: settings.user_id,
-            ai_analysis_enabled: newValue,
-            notifications_enabled: settings.notifications_enabled,
-          },
-          { onConflict: "user_id" }
-        );
-
-      if (error) {
-        console.error("Supabase error:", error.message, error.details);
-        throw new Error(error.message || "Failed to save setting");
-      }
-
-      setSettings(prev => ({ ...prev, ai_analysis_enabled: newValue }));
-      showToast("Saved");
-    } catch (err) {
-      console.error("Error saving AI analysis setting:", err instanceof Error ? err.message : String(err));
-      showToast("Failed to save. Check if user_settings table exists in Supabase.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   // Save Health Reminders setting
   const handleNotificationsToggle = async () => {
     const newValue = !settings.notifications_enabled;
@@ -202,15 +170,16 @@ export default function SettingsPage() {
 
     setIsDeleting(true);
     try {
-      // Sign out the user first
+      const res = await apiFetch("/api/account", { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res, "Failed to delete account."));
+      }
       await supabase.auth.signOut();
-
-      // Then redirect to signup
-      showToast("Account scheduled for deletion");
-      setTimeout(() => router.push("/signup"), 2000);
+      showToast("Your account and data have been deleted");
+      setTimeout(() => router.push("/signup"), 1500);
     } catch (err) {
       console.error("Error during account deletion:", err);
-      showToast("Failed to delete account. Contact support if issue persists.");
+      showToast(err instanceof Error ? err.message : "Failed to delete account. Please try again.");
       setIsDeleting(false);
     }
   };
@@ -262,23 +231,9 @@ export default function SettingsPage() {
         <h3 className="text-xs font-bold text-[#1B4332] uppercase tracking-[0.2em] ml-4">AI & Data Privacy</h3>
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
           <SettingRow 
-            icon={<ShieldCheck size={20} />}
-            title="AI Document Analysis"
-            desc="Allow MedSync AI to index your Health Vault for RAG responses."
-            action={
-              <button 
-                onClick={handleAiAnalysisToggle}
-                disabled={isSaving}
-                className={`w-12 h-6 rounded-full transition-colors relative disabled:opacity-60 ${settings.ai_analysis_enabled ? 'bg-[#2D6A4F]' : 'bg-slate-200'}`}
-              >
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.ai_analysis_enabled ? 'left-7' : 'left-1'}`} />
-              </button>
-            }
-          />
-          <SettingRow 
             icon={<Database size={20} />}
             title="Data Export"
-            desc="Download all your medical records and settings as JSON."
+            desc="Download your account details, settings and a list of your uploaded reports as JSON."
             action={
               <button 
                 onClick={handleDataExport}
@@ -314,7 +269,7 @@ export default function SettingsPage() {
             icon={<Smartphone size={20} />}
             title="Sync Wearables"
             desc="Connect Apple Health, Google Fit, or Oura Ring."
-            action={<button className="bg-[#1B4332] text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase">Connect</button>}
+            action={<span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Coming soon</span>}
           />
         </div>
       </section>

@@ -207,6 +207,31 @@ async def delete_all_reports(user: AuthUser = Depends(get_current_user)):
         return _error(500, "Could not delete reports.")
 
 
+# --- Account ------------------------------------------------------------------------
+
+@app.delete("/account")
+async def delete_account(user: AuthUser = Depends(get_current_user)):
+    """
+    Permanently deletes the user: reports, chunks, stored files, vitals, reminders and
+    settings first, then the auth user. If data removal fails, the
+    account is kept so the user can retry instead of leaving orphaned medical data.
+    """
+
+    def _run() -> dict:
+        result = store.delete_all_for_user(user.id)
+        store.delete_user_storage(user.id)
+        store.delete_user_rows(user.id)
+        get_supabase().auth.admin.delete_user(user.id)
+        return result
+
+    try:
+        result = await run_in_threadpool(_run)
+    except Exception:
+        logger.exception("Account deletion failed")
+        return _error(500, "Could not delete your account. Please try again.")
+    return {"message": "Account deleted", **result}
+
+
 # --- Chat -----------------------------------------------------------------------
 
 class ChatRequest(BaseModel):

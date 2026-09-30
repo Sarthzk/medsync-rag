@@ -37,7 +37,7 @@ export default function SignUpPage() {
         options: {
           data: {
             full_name: name,
-            blood_type: blood_type || "O+",
+            blood_type: blood_type || null,
           },
         },
       });
@@ -78,7 +78,7 @@ export default function SignUpPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md space-y-8 py-10">
           <div className="space-y-2">
             <h2 className="text-3xl font-bold text-[#1B4332]">Create Account</h2>
-            <p className="text-slate-400 text-sm font-medium">Build your encrypted medical identity.</p>
+            <p className="text-slate-400 text-sm font-medium">Keep your medical reports in one private place.</p>
           </div>
 
           <form onSubmit={handleSignUp} className="space-y-5">
@@ -110,7 +110,7 @@ export default function SignUpPage() {
                   <div className="relative">
                     <Droplets className="absolute left-4 top-1/2 -translate-y-1/2 text-[#FFB4A2]" size={18} />
                     <select name="blood_type" className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 outline-none focus:border-[#FFB4A2] appearance-none text-sm font-medium">
-                        <option>O+</option><option>A+</option><option>B+</option><option>AB+</option>
+                        <option value="">Not sure</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option>
                     </select>
                   </div>
                </div>
@@ -143,7 +143,7 @@ export default function SignUpPage() {
 
           <div className="flex items-center gap-2 justify-center opacity-40 pt-4">
             <ShieldCheck size={14} className="text-[#1B4332]" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#1B4332]">HIPAA Compliant Security</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#1B4332]">Private to your account</span>
           </div>
         </motion.div>
       </div>

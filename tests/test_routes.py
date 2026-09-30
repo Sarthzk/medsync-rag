@@ -221,3 +221,43 @@ def test_vitals_insert_is_stamped_with_user(client, monkeypatch):
 def test_vitals_delete_404_when_not_owned(client, monkeypatch):
     monkeypatch.setattr(main, "_sb_delete_vital", lambda user_id, vital_id: False)
     assert client.delete("/vitals/abc").status_code == 404
+
+
+# --- account deletion -------------------------------------------------------------------
+
+def test_delete_account_requires_auth(anon_client):
+    assert anon_client.delete("/account").status_code == 401
+
+
+def test_delete_account_removes_data_then_auth_user(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(main.store, "delete_all_for_user", lambda uid: calls.append(("data", uid)) or {"deleted_reports": 2})
+    monkeypatch.setattr(main.store, "delete_user_storage", lambda uid: calls.append(("storage", uid)) or 0)
+    monkeypatch.setattr(main.store, "delete_user_rows", lambda uid: calls.append(("rows", uid)) or {})
+
+    class FakeAdmin:
+        def delete_user(self, uid):
+            calls.append(("auth", uid))
+
+    fake_sb = type("SB", (), {"auth": type("A", (), {"admin": FakeAdmin()})()})()
+    monkeypatch.setattr(main, "get_supabase", lambda: fake_sb)
+
+    res = client.delete("/account")
+
+    assert res.status_code == 200
+    assert calls == [("data", USER.id), ("storage", USER.id), ("rows", USER.id), ("auth", USER.id)]
+
+
+def test_delete_account_keeps_auth_user_if_data_deletion_fails(client, monkeypatch):
+    def boom(uid):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(main.store, "delete_all_for_user", boom)
+    deleted = []
+    fake_sb = type("SB", (), {"auth": type("A", (), {"admin": type("Ad", (), {"delete_user": lambda self, uid: deleted.append(uid)})()})()})()
+    monkeypatch.setattr(main, "get_supabase", lambda: fake_sb)
+
+    res = client.delete("/account")
+
+    assert res.status_code == 500
+    assert deleted == []

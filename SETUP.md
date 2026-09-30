@@ -20,7 +20,8 @@ Browser ──(Supabase JWT)──▶ Next.js /api/* proxy ──▶ FastAPI (Ve
 ## 1. Supabase (once)
 
 1. Create a project at https://supabase.com (free tier is enough).
-2. SQL Editor → run `supabase/migrations/001_vercel_backend.sql`.
+2. SQL Editor → run `supabase/migrations/001_vercel_backend.sql`, then `002_cascade_user_fks.sql`
+   (lets Supabase delete a user even if older tables were created without `ON DELETE CASCADE`).
 3. Also run the table setups in `frontend/SUPABASE_SETUP.md` (`medication_reminders`)
    and `frontend/SETTINGS_SETUP.md` (`user_settings`) if you haven't.
 4. Project Settings → API: note the **Project URL**, **anon key**, and **service_role key**.
@@ -86,3 +87,4 @@ All routes except `GET /` need `Authorization: Bearer <supabase access token>`.
 | POST | `/chat` | `{question, history}` → `{answer, sources}` |
 | POST | `/chat/stream` | Same, as SSE: `{t}`, `{sources}`, `{faithfulness}`, `{error}`, `[DONE]` |
 | GET/POST/DELETE | `/vitals`, `/vitals/{id}` | The user's vitals log |
+| DELETE | `/account` | Permanently delete the user and all of their data |

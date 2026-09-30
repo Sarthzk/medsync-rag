@@ -88,3 +88,21 @@ def test_match_chunks_sends_empty_filter_when_none(monkeypatch):
 
     assert match_chunks(USER, [0.0], k=3, metadata_filter=None) == []
     assert fake.calls[0][1]["p_filter"] == {}
+
+
+def test_delete_user_storage_removes_everything_in_users_folder(monkeypatch):
+    removed = []
+
+    class Bucket:
+        def list(self, path, options=None):
+            assert path == USER
+            return [{"name": "a.pdf"}, {"name": "b.png"}]
+
+        def remove(self, paths):
+            removed.extend(paths)
+
+    fake = type("SB", (), {"storage": type("S", (), {"from_": lambda self, b: Bucket()})()})()
+    monkeypatch.setattr(medsync_store, "get_supabase", lambda: fake)
+
+    assert medsync_store.delete_user_storage(USER) == 2
+    assert removed == [f"{USER}/a.pdf", f"{USER}/b.png"]

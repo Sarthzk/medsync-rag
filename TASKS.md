@@ -221,6 +221,7 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 > (2) create the `medsync-api` Vercel project, (3) point the existing frontend project's
 > Preview `BACKEND_API_BASE_URL` at it, (4) browser click-through, then merge + retire Railway.
 > Also pending from Task 8: one manual Vault click-through in the browser.
+> Also pending (optional, recommended): run `supabase/migrations/002_cascade_user_fks.sql` in the Supabase SQL editor.
 
 ### Task 9: Deploy `medsync-api`
 - [ ] **(You)** Vercel → New Project → import repo → name `medsync-api`, **Root Directory `/`**, Framework "Other".
@@ -256,9 +257,15 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 - [x] Verified in Chrome against local API + dev server: streamed answer with source check, and API-down error keeps the question and marks the reply failed. Commit.
 
 ### Task 14: Honest UI + small bugs
-- [ ] Vitals: `!= null` checks instead of truthiness (0 values), separate steps vs bpm in the weekly chart, remove hardcoded "AI Health Suggestion" and "synced from your devices" copy, rename "Sleep Quality" → "Sleep (hours)".
-- [ ] Profile: no default "O+" (show "Not set"), remove HIPAA/AES-256 claims, hide non-functional buttons; add negative blood types on signup.
-- [ ] Settings: real account deletion via a backend `DELETE /account` (delete all user data + `auth.admin.delete_user`) or remove the button; make `ai_analysis_enabled` either enforced by the backend or removed.
-- [ ] Chat page header (title + Download Summary) scrolls out of view: the page is `h-screen` inside a layout that also renders a footer, so the document overflows the viewport.
-- [ ] Remove dead code: `components/Sidebar.tsx`, `UploadModal.tsx`, unused Python helpers (`stream_answer_question`, `get_structured_report`).
-- [ ] Update README/SETUP to the new architecture. Commit.
+- [x] Vitals: `!= null` checks instead of truthiness (0 values), separate steps vs bpm in the weekly chart, remove hardcoded "AI Health Suggestion" and "synced from your devices" copy, rename "Sleep Quality" → "Sleep (hours)".
+- [x] Profile: no default "O+" (show "Not set"), remove HIPAA/AES-256 claims and fake phone/location, hide non-functional buttons; add negative blood types + "Not sure" on signup; login/signup/chat copy made accurate.
+- [x] Settings: real account deletion via backend `DELETE /account` (reports, files, vitals, reminders, settings, then the auth user — verified live and from the UI); removed the unenforced "AI Document Analysis" toggle; "Sync Wearables" shows "Coming soon"; export description made accurate.
+- [x] Found: live `user_settings` FK lacks `ON DELETE CASCADE` → API deletes per-user rows explicitly; `002_cascade_user_fks.sql` fixes the schema (optional, see on-hold list).
+- [x] Chat page header (title + Download Summary) scrolls out of view: the page is `h-screen` inside a layout that also renders a footer, so the document overflows the viewport.
+- [x] Remove dead code: `components/Sidebar.tsx`, `UploadModal.tsx`, unused Python helpers (`stream_answer_question`, `get_structured_report`).
+- [x] Update README/SETUP to the new architecture. Verified vitals/profile/chat/settings/account deletion in Chrome. Commit.
+
+### Follow-ups noticed (not started)
+- [ ] Medication "reminders" and "Health Reminders" are stored but nothing ever sends a notification.
+- [ ] Stale docs `DEBUG_REPORT.md`, `DEPENDENCIES.md`, `CODEBASE_INDEX.md` still describe the Chroma/Railway setup — update or delete.
+- [ ] After account deletion the "deleted" toast isn't seen: ClientLayout redirects to /login on sign-out first.

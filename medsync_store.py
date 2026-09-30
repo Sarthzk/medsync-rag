@@ -23,6 +23,9 @@ BUCKET = "reports"
 TABLE_REPORTS = "reports"
 TABLE_CHUNKS = "report_chunks"
 TABLE_REMINDERS = "medication_reminders"
+# Per-user tables removed explicitly on account deletion (don't rely on FK cascades,
+# which may be missing on tables created before the migrations existed).
+USER_OWNED_TABLES = ("vitals", "medication_reminders", "user_settings")
 
 _REPORT_COLUMNS = "id, user_id, filename, storage_path, sha256, structured_report, status, error, created_at"
 _INSERT_BATCH = 100
@@ -253,3 +256,30 @@ def delete_all_for_user(user_id: str) -> dict:
     get_supabase().table(TABLE_REPORTS).delete().eq("user_id", user_id).execute()
     reminders = _delete_reminders(user_id, [r["filename"] for r in reports])
     return {"deleted_reports": len(reports), "medication_reminders_cleaned": reminders}
+
+
+def delete_user_storage(user_id: str) -> int:
+    """Removes every object in the user's Storage folder, incl. uploads that never got a report row."""
+    bucket = get_supabase().storage.from_(BUCKET)
+    removed = 0
+    while True:
+        names = [item["name"] for item in bucket.list(user_id, {"limit": 1000}) or []]
+        if not names:
+            return removed
+        bucket.remove([f"{user_id}/{name}" for name in names])
+        removed += len(names)
+        if len(names) < 1000:
+            return removed
+
+
+def delete_user_rows(user_id: str) -> dict:
+    """Deletes the user's rows from every per-user table; missing tables are skipped."""
+    deleted: dict[str, int] = {}
+    for table in USER_OWNED_TABLES:
+        try:
+            res = get_supabase().table(table).delete().eq("user_id", user_id).execute()
+            deleted[table] = len(res.data or [])
+        except Exception:
+            logger.warning("Could not clear %s for account deletion", table, exc_info=True)
+            deleted[table] = 0
+    return deleted

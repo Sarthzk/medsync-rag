@@ -1,5 +1,5 @@
 "use client";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, readApiError } from "@/lib/api";
 import { Activity, Heart, Moon, Footprints, ArrowUpRight, Plus, X, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
@@ -21,94 +21,108 @@ interface WeeklyActivityPoint {
   height: number;
 }
 
-const getVitalCards = (vitalLogs: VitalLog[]) => {
-  // Get the most recent valid values for each metric.
-  const recentHeartRate = vitalLogs.find((log) => log.heart_rate !== null)?.heart_rate ?? null;
-  const recentSleepQuality = vitalLogs.find((log) => log.sleep_quality !== null)?.sleep_quality ?? null;
-  const recentSteps = vitalLogs.find((log) => log.daily_steps !== null)?.daily_steps ?? null;
+const isSet = (value: number | null | undefined): value is number => value !== null && value !== undefined;
 
-  // Format sleep quality only when real data exists.
-  let sleepFormatted = "--";
-  if (recentSleepQuality !== null) {
-    const sleepHours = Math.floor(recentSleepQuality);
-    const sleepMinutes = Math.round((recentSleepQuality - sleepHours) * 60);
-    sleepFormatted = `${sleepHours}h ${sleepMinutes}m`;
-  }
+const formatSleep = (hours: number) => {
+  const whole = Math.floor(hours);
+  const minutes = Math.round((hours - whole) * 60);
+  return `${whole}h ${minutes}m`;
+};
+
+const getVitalCards = (vitalLogs: VitalLog[]) => {
+  // Most recent logged value for each metric (logs arrive newest first).
+  const recentHeartRate = vitalLogs.find((log) => isSet(log.heart_rate))?.heart_rate ?? null;
+  const recentSleep = vitalLogs.find((log) => isSet(log.sleep_quality))?.sleep_quality ?? null;
+  const recentSteps = vitalLogs.find((log) => isSet(log.daily_steps))?.daily_steps ?? null;
 
   return [
-    { 
-      title: "Heart Rate", 
-      value: recentHeartRate !== null ? recentHeartRate.toString() : "--",
-      unit: "bpm", 
-      status: recentHeartRate === null ? "No data" : recentHeartRate < 100 ? "Normal" : "Elevated",
-      icon: <Heart size={24} />, 
-      color: "bg-[#FFB4A2]/10", 
-      textColor: "text-[#FFB4A2]" 
+    {
+      title: "Heart Rate",
+      value: isSet(recentHeartRate) ? recentHeartRate.toString() : "--",
+      unit: "bpm",
+      status: !isSet(recentHeartRate)
+        ? "No data"
+        : recentHeartRate >= 60 && recentHeartRate <= 100
+        ? "Typical resting range"
+        : "Outside typical resting range",
+      icon: <Heart size={24} />,
+      color: "bg-[#FFB4A2]/10",
+      textColor: "text-[#FFB4A2]",
     },
-    { 
-      title: "Sleep Quality", 
-      value: sleepFormatted, 
-      unit: "Restorative", 
-      status: recentSleepQuality === null ? "No data" : recentSleepQuality >= 7 ? "Good" : "Fair",
-      icon: <Moon size={24} />, 
-      color: "bg-[#2D6A4F]/10", 
-      textColor: "text-[#2D6A4F]" 
+    {
+      title: "Sleep",
+      value: isSet(recentSleep) ? formatSleep(recentSleep) : "--",
+      unit: "last logged",
+      status: !isSet(recentSleep) ? "No data" : recentSleep >= 7 ? "7h or more" : "Under 7h",
+      icon: <Moon size={24} />,
+      color: "bg-[#2D6A4F]/10",
+      textColor: "text-[#2D6A4F]",
     },
-    { 
-      title: "Daily Steps", 
-      value: recentSteps !== null ? recentSteps.toLocaleString() : "--",
-      unit: "steps", 
-      status: recentSteps === null ? "No data" : recentSteps >= 8000 ? "Active" : "Moderate",
-      icon: <Footprints size={24} />, 
-      color: "bg-[#1B4332]/5", 
-      textColor: "text-[#1B4332]" 
+    {
+      title: "Daily Steps",
+      value: isSet(recentSteps) ? recentSteps.toLocaleString() : "--",
+      unit: "steps",
+      status: !isSet(recentSteps) ? "No data" : recentSteps >= 8000 ? "Active" : "Moderate",
+      icon: <Footprints size={24} />,
+      color: "bg-[#1B4332]/5",
+      textColor: "text-[#1B4332]",
     },
   ];
 };
 
+const localDayKey = (date: Date) =>
+  `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+
+/** Steps for each of the last 7 calendar days (today last); latest entry per day wins. */
 const getWeeklyActivityData = (vitalLogs: VitalLog[]): WeeklyActivityPoint[] => {
-  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const recentLogs = [...vitalLogs]
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 7)
-    .sort((a, b) => a.timestamp - b.timestamp);
-
-  const byDay = new Map<string, { value: number; unit: string }>();
-
-  for (const log of recentLogs) {
-    const dayLabel = dayLabels[new Date(log.timestamp).getDay() === 0 ? 6 : new Date(log.timestamp).getDay() - 1];
-    const metricValue = log.daily_steps ?? log.heart_rate;
-    const unit = log.daily_steps !== null ? "steps" : log.heart_rate !== null ? "bpm" : "";
-
-    if (metricValue === null || !unit) continue;
-
-    byDay.set(dayLabel, { value: metricValue, unit });
+  const stepsByDay = new Map<string, number>();
+  // Logs are newest first, so the first value seen for a day is its latest entry.
+  for (const log of vitalLogs) {
+    if (!isSet(log.daily_steps)) continue;
+    const key = localDayKey(new Date(log.timestamp));
+    if (!stepsByDay.has(key)) stepsByDay.set(key, log.daily_steps);
   }
 
-  const values = Array.from(byDay.values()).map((item) => item.value);
-  const maxValue = values.length > 0 ? Math.max(...values) : 0;
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - i));
+    return date;
+  });
+  const values = days.map((day) => stepsByDay.get(localDayKey(day)) ?? null);
+  const maxValue = Math.max(0, ...values.filter(isSet));
 
-  return dayLabels.map((dayLabel) => {
-    const entry = byDay.get(dayLabel) ?? null;
-
-    if (!entry) {
-      return {
-        dayLabel,
-        value: null,
-        displayValue: "No data",
-        unit: "",
-        height: 8,
-      };
+  return days.map((day, i) => {
+    const value = values[i];
+    const dayLabel = day.toLocaleDateString([], { weekday: "short" });
+    if (!isSet(value)) {
+      return { dayLabel, value: null, displayValue: "No data", unit: "", height: 8 };
     }
-
     return {
       dayLabel,
-      value: entry.value,
-      displayValue: entry.unit === "steps" ? entry.value.toLocaleString() : `${entry.value}`,
-      unit: entry.unit,
-      height: maxValue > 0 ? Math.max(12, (entry.value / maxValue) * 100) : 12,
+      value,
+      displayValue: value.toLocaleString(),
+      unit: "steps",
+      height: maxValue > 0 ? Math.max(12, (value / maxValue) * 100) : 12,
     };
   });
+};
+
+const average = (values: number[]) =>
+  values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null;
+
+/** Averages over entries logged in the last 7 days. */
+const getWeeklyAverages = (vitalLogs: VitalLog[]) => {
+  const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recent = vitalLogs.filter((log) => log.timestamp >= since);
+  const heartRate = average(recent.map((l) => l.heart_rate).filter(isSet));
+  const sleep = average(recent.map((l) => l.sleep_quality).filter(isSet));
+  const steps = average(recent.map((l) => l.daily_steps).filter(isSet));
+  return [
+    { label: "Heart rate", value: isSet(heartRate) ? `${Math.round(heartRate)} bpm` : "—" },
+    { label: "Sleep", value: isSet(sleep) ? formatSleep(sleep) : "—" },
+    { label: "Steps", value: isSet(steps) ? Math.round(steps).toLocaleString() : "—" },
+  ];
 };
 
 export default function VitalsPage() {
@@ -150,7 +164,7 @@ export default function VitalsPage() {
       };
 
       // Ensure at least one value is provided
-      if (!payload.heart_rate && !payload.sleep_quality && !payload.daily_steps) {
+      if (!isSet(payload.heart_rate) && !isSet(payload.sleep_quality) && !isSet(payload.daily_steps)) {
         alert("Please enter at least one vital measurement");
         setLoading(false);
         return;
@@ -162,7 +176,7 @@ export default function VitalsPage() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("Failed to log vital");
+      if (!res.ok) throw new Error(await readApiError(res, "Failed to log vital"));
 
       // Refetch vitals to get them in correct order from backend
       await fetchVitalLogs();
@@ -171,7 +185,7 @@ export default function VitalsPage() {
       setShowLogModal(false);
     } catch (err) {
       console.error("Error logging vital:", err);
-      alert("Failed to log vital");
+      alert(err instanceof Error ? err.message : "Failed to log vital");
     } finally {
       setLoading(false);
     }
@@ -194,6 +208,7 @@ export default function VitalsPage() {
 
   const weeklyActivityData = getWeeklyActivityData(vitalLogs);
   const hasWeeklyActivity = weeklyActivityData.some((point) => point.value !== null);
+  const weeklyAverages = getWeeklyAverages(vitalLogs);
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 sm:space-y-10 px-4 sm:px-6 lg:px-8 pt-4 sm:pt-8 lg:pt-12 pb-20">
@@ -201,7 +216,7 @@ export default function VitalsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-[#1B4332] tracking-tight">Your Vitals</h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-2">Real-time health insights synced from your devices.</p>
+          <p className="text-xs sm:text-sm text-slate-500 mt-2">Log your daily vitals and see how they trend over the week.</p>
         </div>
         <button 
           onClick={() => setShowLogModal(true)}
@@ -238,8 +253,8 @@ export default function VitalsPage() {
                 </label>
                 <input
                   type="number"
-                  min="40"
-                  max="200"
+                  min="20"
+                  max="250"
                   value={formData.heart_rate}
                   onChange={(e) => setFormData({ ...formData, heart_rate: e.target.value })}
                   placeholder="e.g., 72"
@@ -251,12 +266,12 @@ export default function VitalsPage() {
               <div>
                 <label className="block text-xs sm:text-sm font-semibold text-[#1B4332] mb-2">
                   <Moon size={14} className="inline mr-2" />
-                  Sleep Quality (hours)
+                  Sleep (hours)
                 </label>
                 <input
                   type="number"
                   min="0"
-                  max="12"
+                  max="24"
                   step="0.5"
                   value={formData.sleep_quality}
                   onChange={(e) => setFormData({ ...formData, sleep_quality: e.target.value })}
@@ -335,8 +350,8 @@ export default function VitalsPage() {
             <h3 className="text-lg sm:text-2xl font-bold mb-2">Weekly Activity</h3>
             <p className="text-white/60 text-xs sm:text-sm mb-4 sm:mb-8">
               {hasWeeklyActivity
-                ? "Showing the last 7 logged entries grouped by weekday."
-                : "No recent activity yet. Log vitals to populate this chart."}
+                ? "Daily steps over the last 7 days."
+                : "No steps logged in the last 7 days. Log vitals to populate this chart."}
             </p>
             <div className="flex items-end gap-3 h-36">
               {weeklyActivityData.map((point) => (
@@ -366,10 +381,16 @@ export default function VitalsPage() {
           <div className="w-14 h-14 sm:w-16 sm:h-16 lg:w-20 lg:h-20 bg-[#FFB4A2]/10 text-[#FFB4A2] rounded-full flex items-center justify-center mx-auto">
             <Activity size={24} />
           </div>
-          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-[#1B4332]">AI Health Suggestion</h3>
-          <p className="text-slate-500 text-xs sm:text-sm leading-relaxed italic">
-            “Your resting heart rate has been 5% lower this week. This suggests improved cardiovascular recovery. Keep up the 20-minute morning walks!”
-          </p>
+          <h3 className="text-base sm:text-lg lg:text-xl font-bold text-[#1B4332]">7-Day Averages</h3>
+          <div className="grid grid-cols-3 gap-3">
+            {weeklyAverages.map((item) => (
+              <div key={item.label} className="bg-slate-50 rounded-2xl p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.label}</p>
+                <p className="text-sm sm:text-base font-bold text-[#1B4332] mt-1">{item.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] sm:text-xs text-slate-400">Based on entries you logged in the last 7 days.</p>
         </div>
       </div>
 
@@ -394,17 +415,17 @@ export default function VitalsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs sm:text-sm font-semibold text-[#1B4332]">{dateStr} at {timeStr}</p>
                     <div className="flex flex-wrap gap-2 sm:gap-3 mt-2 sm:mt-3">
-                      {log.heart_rate && (
+                      {isSet(log.heart_rate) && (
                         <span className="text-[10px] sm:text-xs bg-[#FFB4A2]/20 text-[#FF6B35] px-2 sm:px-3 py-1 rounded-full font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap">
                           <Heart size={10} /> {log.heart_rate} bpm
                         </span>
                       )}
-                      {log.sleep_quality && (
+                      {isSet(log.sleep_quality) && (
                         <span className="text-[10px] sm:text-xs bg-[#2D6A4F]/20 text-[#2D6A4F] px-2 sm:px-3 py-1 rounded-full font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap">
                           <Moon size={10} /> {log.sleep_quality}h
                         </span>
                       )}
-                      {log.daily_steps && (
+                      {isSet(log.daily_steps) && (
                         <span className="text-[10px] sm:text-xs bg-[#1B4332]/20 text-[#1B4332] px-2 sm:px-3 py-1 rounded-full font-medium flex items-center gap-1 sm:gap-2 whitespace-nowrap">
                           <Footprints size={10} /> {log.daily_steps.toLocaleString()}
                         </span>

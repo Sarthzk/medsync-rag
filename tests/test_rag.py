@@ -234,3 +234,52 @@ def test_structured_report_markdown_contains_sections():
     assert md.startswith("# Medical report (scan.png)")
     for part in ("Asha Rao", "## Diagnoses", "Mild anemia", "## Medications", "| Hemoglobin | 10.9 |", "Recheck"):
         assert part in md
+
+
+# --- latency: retrieval prep runs concurrently with classification ------------------
+
+def _slow(value, delay=0.3):
+    import time
+
+    def fn(*args, **kwargs):
+        time.sleep(delay)
+        return value
+
+    return fn
+
+
+def test_answer_question_overlaps_classifier_filter_and_hyde(monkeypatch, cfg, embeddings):
+    import time
+
+    doc = Document(page_content="LDL 162 mg/dL", metadata={"source": "lipid.pdf"})
+    monkeypatch.setattr(rag, "store", FakeStore(match_results=[[doc]]))
+    monkeypatch.setattr(rag, "_classify_intent", _slow("RETRIEVAL"))
+    monkeypatch.setattr(rag, "_build_metadata_filter", _slow(None))
+    monkeypatch.setattr(rag, "_build_hyde_query", _slow("hyde text"))
+    monkeypatch.setattr(
+        rag, "build_medical_answer_chain", lambda cfg_: type("C", (), {"invoke": lambda self, inp: "LDL is high."})()
+    )
+    monkeypatch.delenv("COHERE_API_KEY", raising=False)
+
+    start = time.perf_counter()
+    result = rag.answer_question(cfg, USER, "is my LDL high?", skip_faithfulness=True)
+    elapsed = time.perf_counter() - start
+
+    assert result == {"answer": "LDL is high.", "sources": ["lipid.pdf"]}
+    assert embeddings.queries == ["hyde text"]
+    assert elapsed < 0.55, f"classifier, filter and HyDE should overlap (took {elapsed:.2f}s)"
+
+
+def test_stream_skips_retrieval_for_conversation(monkeypatch, cfg):
+    store = FakeStore()
+    monkeypatch.setattr(rag, "store", store)
+    monkeypatch.setattr(rag, "_classify_intent", lambda *a, **k: "CONVERSATIONAL")
+    monkeypatch.setattr(rag, "_build_metadata_filter", lambda *a, **k: None)
+    monkeypatch.setattr(rag, "_build_hyde_query", lambda cfg_, q, history=None: q)
+    monkeypatch.setattr(rag, "_iter_llm_stream_tokens", lambda llm, messages: iter(["Hi", "!"]))
+    monkeypatch.setattr(rag, "ChatOpenAI", lambda **kwargs: object())
+
+    events = list(rag.iter_chat_stream_events(cfg, USER, "hello there"))
+
+    assert [e["text"] for e in events] == ["Hi", "!"]
+    assert store.match_calls == []

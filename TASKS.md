@@ -249,14 +249,16 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 - [x] Tests for the text path using a monkeypatched LLM. Live check: 24-lab text PDF now stays on the text path (previously fell back to vision). Commit.
 
 ### Task 13: Chat UX correctness
-- [ ] Cut time-to-first-token (~11 s measured): run metadata-filter and HyDE LLM calls concurrently; skip HyDE for short factual questions.
-- [ ] Send history as paired `{user, assistant}` turns.
-- [ ] Handle `error`, `sources`, `faithfulness` SSE events; on failure keep the user message and mark the assistant bubble as failed instead of `slice(0,-1)`.
-- [ ] Hide the "Analyzing…" spinner once the first token arrives. Commit.
+- [x] Cut time-to-first-token (~11 s measured): filter + HyDE now start concurrently with the intent classifier (measured serial prep ≈5.4 s warm → ≈ slowest single call). Dropped the "skip HyDE" idea: no reliable heuristic, and overlap already removes most of its latency.
+- [x] Send history as paired `{user, assistant}` turns.
+- [x] Handle `error`, `sources`, `faithfulness` SSE events; on failure keep the user message and mark the assistant bubble as failed instead of `slice(0,-1)`.
+- [x] Hide the "Analyzing…" spinner once the first token arrives (now inside the reply bubble); show the faithfulness verdict under answers.
+- [x] Verified in Chrome against local API + dev server: streamed answer with source check, and API-down error keeps the question and marks the reply failed. Commit.
 
 ### Task 14: Honest UI + small bugs
 - [ ] Vitals: `!= null` checks instead of truthiness (0 values), separate steps vs bpm in the weekly chart, remove hardcoded "AI Health Suggestion" and "synced from your devices" copy, rename "Sleep Quality" → "Sleep (hours)".
 - [ ] Profile: no default "O+" (show "Not set"), remove HIPAA/AES-256 claims, hide non-functional buttons; add negative blood types on signup.
 - [ ] Settings: real account deletion via a backend `DELETE /account` (delete all user data + `auth.admin.delete_user`) or remove the button; make `ai_analysis_enabled` either enforced by the backend or removed.
+- [ ] Chat page header (title + Download Summary) scrolls out of view: the page is `h-screen` inside a layout that also renders a footer, so the document overflows the viewport.
 - [ ] Remove dead code: `components/Sidebar.tsx`, `UploadModal.tsx`, unused Python helpers (`stream_answer_question`, `get_structured_report`).
 - [ ] Update README/SETUP to the new architecture. Commit.

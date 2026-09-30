@@ -1,5 +1,5 @@
 "use client";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, readApiError } from "@/lib/api";
 import { useState, useRef, useLayoutEffect } from "react";
 import { Send, Loader2, FileText, AlertCircle, Zap, ChevronDown, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -8,13 +8,40 @@ import remarkGfm from "remark-gfm";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
+type FaithfulnessVerdict = {
+  confidence: number | null;
+  unsupported_claims: string[];
+  all_supported: boolean;
+  notes: string;
+  verification_failed: boolean;
+};
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
   sources?: string[];
+  status?: "streaming" | "done" | "error";
+  errorText?: string;
+  faithfulness?: FaithfulnessVerdict;
 }
+
+type HistoryTurn = { user: string; assistant?: string };
+
+/** Pairs each user message with the assistant reply that followed it (last 5 exchanges). */
+const buildHistory = (messages: Message[]): HistoryTurn[] => {
+  const turns: HistoryTurn[] = [];
+  for (const message of messages) {
+    if (message.role === "user") {
+      turns.push({ user: message.content });
+    } else if (message.status !== "error" && message.content && turns.length > 0) {
+      const last = turns[turns.length - 1];
+      if (last.assistant === undefined) last.assistant = message.content;
+    }
+  }
+  return turns.slice(-5);
+};
 
 type LabResult = {
   name: string;
@@ -245,97 +272,85 @@ export default function ChatPage() {
     didInitialScrollRef.current = true;
   }, [messages, isLoading]);
 
+  const updateMessage = (id: string, patch: Partial<Message>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  };
+
   const handleSendMessage = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!input.trim()) return;
+    const question = input.trim();
+    if (!question || isLoading) return;
 
     // User sent a new message from the composer, so keep the feed anchored.
     shouldAutoScrollRef.current = true;
 
-    // Add user message to chat
+    const now = Date.now();
     const userMessage: Message = {
-      id: `msg_${Date.now()}`,
+      id: `msg_${now}_user`,
       role: "user",
-      content: input,
+      content: question,
       timestamp: new Date(),
     };
+    const assistantId = `msg_${now}_assistant`;
+    const history = buildHistory(messages);
 
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => [
+      ...prev,
+      userMessage,
+      { id: assistantId, role: "assistant", content: "", timestamp: new Date(), sources: [], status: "streaming" },
+    ]);
     setInput("");
     setIsLoading(true);
     setError(null);
+
+    let fullContent = "";
+    let streamError: string | null = null;
 
     try {
       const response = await apiFetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: userMessage.content,
-          session_id: sessionId,
-          history: messages.map((m) => ({
-            user: m.role === "user" ? m.content : undefined,
-            assistant: m.role === "assistant" ? m.content : undefined,
-          })),
-        }),
+        body: JSON.stringify({ question, session_id: sessionId, history }),
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Chat stream failed with status ${response.status}:`, errorText);
-        throw new Error(`Failed to get response (${response.status}): ${errorText.slice(0, 100)}`);
+        throw new Error(await readApiError(response, `Failed to get a response (${response.status}).`));
       }
-
       if (!response.body) {
         throw new Error("No response body");
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let fullContent = "";
-      let sources: string[] = [];
       let sseBuffer = "";
 
-      const assistantMessage: Message = {
-        id: `msg_${Date.now()}`,
-        role: "assistant",
-        content: "",
-        timestamp: new Date(),
-        sources: [],
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-      const messageId = assistantMessage.id;
-
       const processSseEvent = (eventBlock: string) => {
-        const lines = eventBlock.split("\n");
-        for (const line of lines) {
+        for (const line of eventBlock.split("\n")) {
           if (!line.startsWith("data: ")) continue;
           const data = line.slice(6);
           if (data === "[DONE]") continue;
 
+          let parsed: {
+            t?: string;
+            sources?: unknown;
+            faithfulness?: FaithfulnessVerdict;
+            error?: string;
+          };
           try {
-            const parsed = JSON.parse(data);
-            if (parsed.t) {
-              fullContent += parsed.t;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === messageId
-                    ? { ...m, content: fullContent }
-                    : m
-                )
-              );
-            } else if (parsed.sources && Array.isArray(parsed.sources)) {
-              sources = parsed.sources;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === messageId
-                    ? { ...m, sources }
-                    : m
-                )
-              );
-            }
+            parsed = JSON.parse(data);
           } catch {
-            // Ignore malformed event payloads.
+            continue; // Ignore malformed event payloads.
+          }
+
+          if (typeof parsed.t === "string") {
+            fullContent += parsed.t;
+            updateMessage(assistantId, { content: fullContent });
+          } else if (Array.isArray(parsed.sources)) {
+            updateMessage(assistantId, { sources: parsed.sources as string[] });
+          } else if (parsed.faithfulness) {
+            updateMessage(assistantId, { faithfulness: parsed.faithfulness });
+          } else if (typeof parsed.error === "string") {
+            streamError = parsed.error;
           }
         }
       };
@@ -344,26 +359,27 @@ export default function ChatPage() {
         const { done, value } = await reader.read();
         if (done) {
           sseBuffer += decoder.decode();
-          if (sseBuffer.trim()) {
-            processSseEvent(sseBuffer);
-          }
+          if (sseBuffer.trim()) processSseEvent(sseBuffer);
           break;
         }
-
         sseBuffer += decoder.decode(value, { stream: true });
         const events = sseBuffer.split("\n\n");
         sseBuffer = events.pop() ?? "";
-        for (const eventBlock of events) {
-          processSseEvent(eventBlock);
-        }
+        for (const eventBlock of events) processSseEvent(eventBlock);
+      }
+
+      if (!streamError && !fullContent) {
+        streamError = "The assistant returned an empty response. Please try again.";
       }
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Connection failed";
-      setError(errorMsg);
       console.error("Chat error:", err);
-      // Remove the added message on error
-      setMessages((prev) => prev.slice(0, -1));
+      streamError = err instanceof Error ? err.message : "Connection failed";
     } finally {
+      // Keep the user's message and any partial answer; just mark how the reply ended.
+      updateMessage(
+        assistantId,
+        streamError ? { status: "error", errorText: streamError } : { status: "done" }
+      );
       setIsLoading(false);
     }
   };
@@ -467,7 +483,12 @@ export default function ChatPage() {
                               : "bg-white border border-slate-200 text-[#1B4332] rounded-bl-sm"
                           }`}
                         >
-                          {message.role === "assistant" ? (
+                          {message.role === "assistant" && message.status === "streaming" && !message.content ? (
+                            <div className="flex items-center gap-2">
+                              <Loader2 size={16} className="animate-spin text-[#2D6A4F]" />
+                              <p className="text-sm text-slate-600">Analyzing your documents...</p>
+                            </div>
+                          ) : message.role === "assistant" ? (
                             <div className="text-xs sm:text-sm leading-relaxed prose prose-sm max-w-none prose-headings:text-[#1B4332] prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-strong:text-[#1B4332] prose-table:block prose-th:px-2 prose-td:px-2 prose-th:py-1 prose-td:py-1 prose-th:border prose-td:border prose-table:border-collapse prose-table:border-slate-200">
                               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                 {message.content}
@@ -475,6 +496,15 @@ export default function ChatPage() {
                             </div>
                           ) : (
                             <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                          )}
+                          {message.status === "error" && (
+                            <p className="mt-2 flex items-start gap-1.5 text-[10px] sm:text-xs text-red-600">
+                              <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                              <span>
+                                {message.content ? "The answer was interrupted: " : "Couldn't get an answer: "}
+                                {message.errorText}
+                              </span>
+                            </p>
                           )}
                           <p
                             className={`text-[10px] sm:text-xs mt-1 sm:mt-2 ${
@@ -487,6 +517,11 @@ export default function ChatPage() {
                             })}
                           </p>
                         </div>
+
+                        {/* Source check (faithfulness verdict) */}
+                        {message.role === "assistant" && message.faithfulness && (
+                          <FaithfulnessNote verdict={message.faithfulness} />
+                        )}
 
                         {/* Sources Section */}
                         {message.role === "assistant" && message.sources && message.sources.length > 0 && (
@@ -537,20 +572,6 @@ export default function ChatPage() {
                     </motion.div>
                   ))}
                 </AnimatePresence>
-                {isLoading && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex justify-start"
-                  >
-                    <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Loader2 size={16} className="animate-spin text-[#2D6A4F]" />
-                        <p className="text-sm text-slate-600">Analyzing your documents...</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
                 {error && (
                   <motion.div
                     key="error"
@@ -604,5 +625,33 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function FaithfulnessNote({ verdict }: { verdict: FaithfulnessVerdict }) {
+  if (verdict.verification_failed) {
+    return (
+      <p className="mt-2 text-[10px] sm:text-xs text-slate-500">
+        Source check didn&apos;t complete — confirm important details against your original reports.
+      </p>
+    );
+  }
+  if (verdict.unsupported_claims.length > 0) {
+    return (
+      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] sm:text-xs text-amber-800">
+        <p className="font-semibold">Not clearly supported by your reports:</p>
+        <ul className="mt-1 list-disc pl-4 space-y-0.5">
+          {verdict.unsupported_claims.slice(0, 5).map((claim) => (
+            <li key={claim}>{claim}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <p className="mt-2 text-[10px] sm:text-xs text-emerald-700">
+      ✓ Checked against your reports
+      {typeof verdict.confidence === "number" ? ` (${Math.round(verdict.confidence * 100)}% confidence)` : ""}
+    </p>
   );
 }

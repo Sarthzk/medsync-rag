@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import lru_cache
 from datetime import UTC, datetime
 import urllib.error
@@ -1108,6 +1109,36 @@ def build_general_medical_chain(cfg: MedSyncConfig) -> Runnable:
     return RunnableLambda(_general_medical_messages) | llm | StrOutputParser()
 
 
+# Shared pool for the independent LLM calls that prepare retrieval.
+_PREP_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="medsync-prep")
+
+
+@dataclass
+class _RetrievalPrep:
+    """In-flight metadata-filter and HyDE calls (both swallow their own errors)."""
+
+    metadata_filter: Future
+    retrieval_query: Future
+
+    def cancel(self) -> None:
+        self.metadata_filter.cancel()
+        self.retrieval_query.cancel()
+
+
+def _start_retrieval_prep(
+    cfg: MedSyncConfig, question: str, history: list[dict] | None
+) -> _RetrievalPrep:
+    """
+    Starts the filter and HyDE calls concurrently. Callers start this before intent
+    classification so retrieval latency overlaps with it; the work is discarded for
+    non-retrieval intents.
+    """
+    return _RetrievalPrep(
+        metadata_filter=_PREP_EXECUTOR.submit(_build_metadata_filter, cfg, question, history=history),
+        retrieval_query=_PREP_EXECUTOR.submit(_build_hyde_query, cfg, question, history=history),
+    )
+
+
 def _retrieve_rag_documents(
     cfg: MedSyncConfig,
     user_id: str,
@@ -1115,12 +1146,14 @@ def _retrieve_rag_documents(
     *,
     k: int = 5,
     history: list[dict] | None = None,
+    prep: _RetrievalPrep | None = None,
 ) -> list[Document]:
     """Semantic retrieval (HyDE query, optional metadata pre-filter) + rerank, scoped to the user."""
     final_k = max(5, k)
     candidate_k = max(20, final_k)
-    metadata_filter = _build_metadata_filter(cfg, question, history=history)
-    retrieval_query = _build_hyde_query(cfg, question, history=history)
+    prep = prep or _start_retrieval_prep(cfg, question, history)
+    metadata_filter = prep.metadata_filter.result()
+    retrieval_query = prep.retrieval_query.result()
     query_embedding = _embeddings(cfg).embed_query(retrieval_query)
 
     candidates = store.match_chunks(
@@ -1289,15 +1322,18 @@ def answer_question(
         return {"answer": "Please ask a question.", "sources": []}
 
     hist = history or []
+    prep = _start_retrieval_prep(cfg, question, history)
     intent = _classify_intent(cfg, question, history=history)
     if intent == "CONVERSATIONAL":
+        prep.cancel()
         answer = build_conversational_chain(cfg).invoke({"question": question, "history": hist})
         return {"answer": answer, "sources": []}
     if intent == "GENERAL_MEDICAL":
+        prep.cancel()
         answer = build_general_medical_chain(cfg).invoke({"question": question, "history": hist})
         return {"answer": answer, "sources": []}
 
-    docs = _retrieve_rag_documents(cfg, user_id, question, k=k, history=history)
+    docs = _retrieve_rag_documents(cfg, user_id, question, k=k, history=history, prep=prep)
     if not docs:
         return {"answer": _NO_REPORT_CONTENT_MESSAGE, "sources": []}
     sources = extract_sources(docs)
@@ -1333,10 +1369,12 @@ def iter_chat_stream_events(
         yield {"event": "token", "text": "Please ask a question."}
         return
 
+    prep = _start_retrieval_prep(cfg, question, history)
     intent = _classify_intent(cfg, question, history=history)
     hist = history or []
 
     if intent in ("CONVERSATIONAL", "GENERAL_MEDICAL"):
+        prep.cancel()
         if cfg.llm_disabled:
             chain = (
                 build_conversational_chain(cfg)
@@ -1358,7 +1396,7 @@ def iter_chat_stream_events(
             yield {"event": "token", "text": t}
         return
 
-    docs = _retrieve_rag_documents(cfg, user_id, question, k=k, history=history)
+    docs = _retrieve_rag_documents(cfg, user_id, question, k=k, history=history, prep=prep)
     if not docs:
         yield {"event": "token", "text": _NO_REPORT_CONTENT_MESSAGE}
         return

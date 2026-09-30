@@ -20,8 +20,8 @@ Browser ──(Supabase JWT)──▶ Next.js /api/* proxy ──▶ FastAPI (Ve
 ## 1. Supabase (once)
 
 1. Create a project at https://supabase.com (free tier is enough).
-2. SQL Editor → run `supabase/migrations/001_vercel_backend.sql`, then `002_cascade_user_fks.sql`
-   (lets Supabase delete a user even if older tables were created without `ON DELETE CASCADE`).
+2. SQL Editor → run the files in `supabase/migrations/` in order (`001` → `003`):
+   schema + storage, cascading user deletes, and tightened Row Level Security.
 3. Also run the table setups in `frontend/SUPABASE_SETUP.md` (`medication_reminders`)
    and `frontend/SETTINGS_SETUP.md` (`user_settings`) if you haven't.
 4. Project Settings → API: note the **Project URL**, **anon key**, and **service_role key**.

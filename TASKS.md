@@ -221,7 +221,7 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 > (2) create the `medsync-api` Vercel project, (3) point the existing frontend project's
 > Preview `BACKEND_API_BASE_URL` at it, (4) browser click-through, then merge + retire Railway.
 > Also pending from Task 8: one manual Vault click-through in the browser.
-> Also pending (optional, recommended): run `supabase/migrations/002_cascade_user_fks.sql` in the Supabase SQL editor.
+> ✅ Supabase items done on 2026-10-01 via the Supabase plugin: `002` applied (user_settings FK now cascades) and `003` applied (closed an open `vitals` policy that let anyone with the anon key read/write all vitals; tightened all owner policies). Remaining optional: enable Leaked Password Protection in Supabase → Authentication settings (may require a paid plan).
 
 ### Task 9: Deploy `medsync-api`
 - [ ] **(You)** Vercel → New Project → import repo → name `medsync-api`, **Root Directory `/`**, Framework "Other".
@@ -279,4 +279,11 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 - [x] Show the "account deleted" confirmation after deletion.
 - [x] Stale docs: removed `DEBUG_REPORT.md` and `DEPENDENCIES.md`, rewrote `CODEBASE_INDEX.md` and `frontend/README.md`; added `.github/workflows/ci.yml` (both jobs simulated from a clean state) and `frontend/.env.example`.
 - [ ] Not done — needs your decision: actual reminder notifications (email/push + Vercel Cron), per-user rate limiting of OpenAI usage (needs a new table).
+
+### Task 16: Supabase hardening (applied 2026-10-01 with your approval)
+- [x] Applied `002_cascade_user_fks.sql` — `user_settings_user_id_fkey` was `NO ACTION`; now all 5 user FKs cascade (verified with a plain auth delete).
+- [x] Found via advisors: `vitals` policy "Allow all access to vitals" (ALL, public, `true`) — an anonymous request with the public anon key returned every vitals row.
+- [x] Applied `003_tighten_rls_policies.sql`: dropped it; owner-only policies `TO authenticated` with `(select auth.uid())`; `user_settings` duplicates replaced by select/insert/update with `WITH CHECK`.
+- [x] Verified: anon sees 0 rows in all 5 tables and can't insert; users can upsert their own settings/reminders; cross-user reads/writes and `user_id` reassignment are blocked; API vitals endpoints unaffected; performance WARN lints 14 → 0.
+- [ ] Optional (dashboard): enable Leaked Password Protection (Authentication → settings).
 

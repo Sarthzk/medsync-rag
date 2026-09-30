@@ -224,9 +224,10 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 > ✅ Supabase items done on 2026-10-01 via the Supabase plugin: `002` applied (user_settings FK now cascades) and `003` applied (closed an open `vitals` policy that let anyone with the anon key read/write all vitals; tightened all owner policies). Remaining optional: enable Leaked Password Protection in Supabase → Authentication settings (may require a paid plan).
 
 ### Task 9: Deploy `medsync-api`
-- [ ] **(You)** Vercel → New Project → import repo → name `medsync-api`, **Root Directory `/`**, Framework "Other".
-- [ ] Env vars: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ALLOW_ORIGINS=https://<web-domain>`, optional `COHERE_API_KEY`, `LOG_LEVEL=INFO`.
-- [ ] Verify: `curl https://<api>.vercel.app/` → 200; `/reports` → 401; Vercel function log shows no import errors; check bundle size in build output.
+- [x] **(You)** Vercel → New Project → import repo → name `medsync-api`, **Root Directory `/`**, Framework "Other".
+- [x] Env vars: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ALLOW_ORIGINS=https://<web-domain>`, optional `COHERE_API_KEY`, `LOG_LEVEL=INFO`.
+- [x] Verify: `curl https://<api>.vercel.app/` → 200; `/reports` → 401; Vercel function log shows no import errors; check bundle size in build output.
+- [x] Done 2026-10-01 via the Vercel plugin: project `medsync-api` (FastAPI preset, root `/`, Deployment Protection off — every route but `/` requires a Supabase JWT). Stable URL https://medsync-api-sarthzks-projects.vercel.app. Full live E2E (upload → ingest → chat/stream → vitals → delete) passed on Vercel.
 
 ### Task 10: Deploy `medsync-web`
 - [ ] **(You)** New Project from the same repo → `medsync-web`, **Root Directory `frontend`**, Framework Next.js.

@@ -34,9 +34,9 @@ export default function HomePage() {
       {/* 2. Main Navigation Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5 lg:gap-6">
         {[
-          { title: "MedSync AI", desc: "Instant RAG-based medical consultation.", icon: <MessageSquare size={28} />, href: "/chat", color: "bg-[#1B4332] text-white" },
+          { title: "MedSync AI", desc: "Ask questions about your own reports.", icon: <MessageSquare size={28} />, href: "/chat", color: "bg-[#1B4332] text-white" },
           { title: "Health Vault", desc: "Your encrypted document library.", icon: <FolderHeart size={28} />, href: "/vault", color: "bg-white text-[#1B4332]" },
-          { title: "Analytics", desc: "Deep health trends & issue clusters.", icon: <Activity size={28} />, href: "/analytics", color: "bg-[#FFB4A2]/20 text-[#1B4332]" },
+          { title: "Analytics", desc: "An overview of your latest report.", icon: <Activity size={28} />, href: "/analytics", color: "bg-[#FFB4A2]/20 text-[#1B4332]" },
         ].map((action, i) => (
           <Link href={action.href} key={i}>
             <motion.div whileHover={{ y: -8 }} className={`${action.color} p-8 sm:p-9 lg:p-10 rounded-[3rem] h-full flex flex-col justify-between border border-slate-100 shadow-sm hover:shadow-2xl transition-all`}>

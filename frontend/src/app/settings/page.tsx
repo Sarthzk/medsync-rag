@@ -175,8 +175,8 @@ export default function SettingsPage() {
         throw new Error(await readApiError(res, "Failed to delete account."));
       }
       await supabase.auth.signOut();
-      showToast("Your account and data have been deleted");
-      setTimeout(() => router.push("/signup"), 1500);
+      // Full navigation: the layout's sign-out redirect would otherwise race a client push.
+      window.location.replace("/signup?deleted=1");
     } catch (err) {
       console.error("Error during account deletion:", err);
       showToast(err instanceof Error ? err.message : "Failed to delete account. Please try again.");
@@ -254,7 +254,7 @@ export default function SettingsPage() {
           <SettingRow 
             icon={<Bell size={20} />}
             title="Health Reminders"
-            desc="Get notified about upcoming checkups and medicine times."
+            desc="Save your preference for checkup and medicine reminders (notifications coming soon)."
             action={
               <button 
                 onClick={handleNotificationsToggle}

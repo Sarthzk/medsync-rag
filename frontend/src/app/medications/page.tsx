@@ -68,7 +68,14 @@ const dedupeMedications = (medications: string[]) => {
 
 const formatDateLabel = (value?: string | number | null) => {
   if (value === null || value === undefined || value === "") return "Unknown";
-  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  // Date-only strings ("2026-03-01") are calendar dates: build them in local time, since
+  // `new Date("2026-03-01")` is UTC midnight and shows the previous day west of UTC.
+  const dateOnly = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : typeof value === "number"
+    ? new Date(value * 1000)
+    : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString([], {
     year: "numeric",
@@ -230,7 +237,7 @@ export default function MedicationsPage() {
         <div className="space-y-2">
           <h1 className="text-4xl font-bold text-[#1B4332] tracking-tight">Medications</h1>
           <p className="text-slate-500 max-w-2xl">
-            Review medications extracted from your latest report and turn on reminders to store them in Supabase.
+            Review medications extracted from your latest report and mark the ones you want reminders for. Reminder notifications aren&apos;t sent yet — your choices are saved for when they are.
           </p>
         </div>
         <button

@@ -3,13 +3,19 @@ import { motion } from "framer-motion";
 import { User, Mail, Lock, Droplets, ArrowRight, ShieldCheck, Heart, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { createClient } from "@/lib/supabase";
 
 export default function SignUpPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set by Settings after account deletion; read from the URL on the client only.
+  const accountDeleted = useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).get("deleted") === "1",
+    () => false
+  );
   const supabase = createClient();
 
   const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -80,6 +86,12 @@ export default function SignUpPage() {
             <h2 className="text-3xl font-bold text-[#1B4332]">Create Account</h2>
             <p className="text-slate-400 text-sm font-medium">Keep your medical reports in one private place.</p>
           </div>
+
+          {accountDeleted && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm text-emerald-800">
+              Your account and all of its data have been permanently deleted.
+            </div>
+          )}
 
           <form onSubmit={handleSignUp} className="space-y-5">
             {error && (

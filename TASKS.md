@@ -266,6 +266,17 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 - [x] Update README/SETUP to the new architecture. Verified vitals/profile/chat/settings/account deletion in Chrome. Commit.
 
 ### Follow-ups noticed (not started)
-- [ ] Medication "reminders" and "Health Reminders" are stored but nothing ever sends a notification.
-- [ ] Stale docs `DEBUG_REPORT.md`, `DEPENDENCIES.md`, `CODEBASE_INDEX.md` still describe the Chroma/Railway setup — update or delete.
-- [ ] After account deletion the "deleted" toast isn't seen: ClientLayout redirects to /login on sign-out first.
+- [ ] Medication "reminders" and "Health Reminders" are stored but nothing ever sends a notification (copy now says so; sending needs your decision — see Task 15).
+- [x] Stale docs `DEBUG_REPORT.md`, `DEPENDENCIES.md`, `CODEBASE_INDEX.md` — handled in Task 15.
+- [x] After account deletion the "deleted" toast isn't seen — fixed in Task 15 (message on /signup).
+
+### Task 15: Independent cleanups (while deployment is on hold)
+- [x] Re-uploading under an existing display name leaves the previous Storage object orphaned → remove it.
+- [x] Cap chat `history` size server-side (cost guard; `question` is already capped).
+- [x] Don't log a rerank warning on every chat when `COHERE_API_KEY` isn't set.
+- [x] `YYYY-MM-DD` report dates render a day early west of UTC (parsed as UTC midnight).
+- [x] Honest copy: home cards ("Deep health trends & issue clusters", "consultation"), reminders that never notify.
+- [x] Show the "account deleted" confirmation after deletion.
+- [x] Stale docs: removed `DEBUG_REPORT.md` and `DEPENDENCIES.md`, rewrote `CODEBASE_INDEX.md` and `frontend/README.md`; added `.github/workflows/ci.yml` (both jobs simulated from a clean state) and `frontend/.env.example`.
+- [ ] Not done — needs your decision: actual reminder notifications (email/push + Vercel Cron), per-user rate limiting of OpenAI usage (needs a new table).
+

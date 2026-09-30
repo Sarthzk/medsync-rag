@@ -7,7 +7,7 @@
 plan, retire Railway, and fix the security/functional bugs found in the project review.
 
 **Architecture:** Two Vercel projects from one repo — `medsync-web` (root dir `frontend/`)
-and `medsync-api` (root dir `/`, FastAPI exposed through `api/index.py`). Vercel functions
+and `medsync-api` (root dir `/`, FastAPI preset auto-detecting `app` in `main.py`). Vercel functions
 are stateless with a read-only filesystem, so all state moves to Supabase (free tier):
 Postgres + **pgvector** replaces Chroma, **Supabase Storage** replaces `uploads/`, and a
 `reports` table replaces `.medsync_cache/`. Every backend request carries the user's
@@ -41,7 +41,7 @@ Storage), Next.js 16, Vercel Hobby.
 | `medsync_store.py` (new) | All Supabase data access: storage download/signed URLs, `reports` rows, chunk insert/search/delete |
 | `medsync_rag.py` | Extraction + RAG logic; Chroma/disk code removed, calls `medsync_store` |
 | `main.py` | HTTP layer only: routes, auth dependency, status codes |
-| `api/index.py`, `vercel.json`, `.vercelignore`, `requirements.txt` | Vercel backend packaging |
+| `vercel.json`, `.vercelignore`, `requirements.txt` | Vercel backend packaging (`api/index.py` was removed on 2026-10-01 in favour of the FastAPI preset) |
 | `tests/` (new) | pytest unit tests for pure logic (auth header parsing, path checks, chunking, filters) |
 | `frontend/src/lib/backend.ts` | Proxy helper: forwards `Authorization`, no localhost fallback in prod |
 | `frontend/src/lib/api.ts` (new) | Browser helper `apiFetch()` that attaches the Supabase access token |

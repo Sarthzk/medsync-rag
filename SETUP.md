@@ -4,7 +4,7 @@ MedSync is two apps in one repo, deployed as **two Vercel projects** on the free
 
 | Part | Directory | Vercel project | Runtime |
 |---|---|---|---|
-| API (FastAPI + RAG) | `/` (entry `api/index.py`) | `medsync-api` | Python 3.12 function |
+| API (FastAPI + RAG) | `/` (entry `main.py`, FastAPI preset) | `medsync-api` | Python function |
 | Web (Next.js) | `frontend/` | `medsync-web` | Next.js |
 
 All state lives in **Supabase**: Auth, Postgres + pgvector (report chunks), and a private

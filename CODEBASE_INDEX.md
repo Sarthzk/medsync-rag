@@ -10,7 +10,7 @@ Setup and deployment: [SETUP.md](SETUP.md). Work plan and status: [TASKS.md](TAS
 | `medsync_auth.py` | Validates the caller's Supabase JWT (`get_current_user`); shared service-role client |
 | `medsync_store.py` | All Supabase data access: Storage objects, `reports` rows, `report_chunks` (pgvector) search, deletions |
 | `medsync_rag.py` | Extraction (PyMuPDF text / OpenAI vision), chunking + embeddings, intent routing, HyDE retrieval, answer + faithfulness check |
-| `api/index.py` | Vercel entrypoint (`vercel.json` rewrites every path here) |
+| `vercel.json` | Vercel's FastAPI preset auto-detects `app` in `main.py` and builds one function; config keyed on `main.py` |
 | `supabase/migrations/` | SQL to run in the Supabase SQL editor (tables, pgvector search function, storage bucket + policies) |
 | `tests/` | pytest suite; external services are faked, run with `./venv/bin/pytest -q` |
 

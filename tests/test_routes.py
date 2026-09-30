@@ -261,3 +261,32 @@ def test_delete_account_keeps_auth_user_if_data_deletion_fails(client, monkeypat
 
     assert res.status_code == 500
     assert deleted == []
+
+
+# --- request size guards -------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        [{"user": "q", "assistant": "a"}] * 21,  # too many turns
+        [{"user": "x" * 12001}],  # oversized turn
+    ],
+)
+def test_chat_rejects_oversized_history(client, monkeypatch, history):
+    monkeypatch.setattr(main, "answer_question", lambda *a, **k: {"answer": "", "sources": []})
+    assert client.post("/chat", json={"question": "q", "history": history}).status_code == 422
+    assert client.post("/chat/stream", json={"question": "q", "history": history}).status_code == 422
+
+
+def test_chat_passes_history_as_plain_dicts(client, monkeypatch):
+    seen = {}
+
+    def fake_answer(cfg, user_id, question, *, history, **kwargs):
+        seen["history"] = history
+        return {"answer": "ok", "sources": []}
+
+    monkeypatch.setattr(main, "answer_question", fake_answer)
+    res = client.post("/chat", json={"question": "q", "history": [{"user": "hi", "assistant": "hello"}, {"user": "next"}]})
+
+    assert res.status_code == 200
+    assert seen["history"] == [{"user": "hi", "assistant": "hello"}, {"user": "next", "assistant": None}]

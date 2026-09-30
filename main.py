@@ -234,13 +234,21 @@ async def delete_account(user: AuthUser = Depends(get_current_user)):
 
 # --- Chat -----------------------------------------------------------------------
 
+class HistoryTurn(BaseModel):
+    user: str | None = Field(default=None, max_length=12_000)
+    assistant: str | None = Field(default=None, max_length=12_000)
+
+
 class ChatRequest(BaseModel):
-    """Request payload schema for the chat endpoints."""
+    """Request payload schema for the chat endpoints (sizes capped to bound LLM cost)."""
 
     question: str = Field(default="", max_length=4000)
-    session_id: str | None = None
-    history: list[dict[str, str | None]] | None = None
+    session_id: str | None = Field(default=None, max_length=200)
+    history: list[HistoryTurn] | None = Field(default=None, max_length=20)
     skip_faithfulness: bool = False
+
+    def history_dicts(self) -> list[dict]:
+        return [turn.model_dump() for turn in self.history or []]
 
 
 @app.post("/chat")
@@ -254,7 +262,7 @@ async def chat_with_report(request: ChatRequest, user: AuthUser = Depends(get_cu
             user.id,
             request.question,
             k=5,
-            history=request.history or [],
+            history=request.history_dicts(),
             skip_faithfulness=request.skip_faithfulness,
         )
     except Exception:
@@ -275,7 +283,7 @@ def chat_with_report_stream(request: ChatRequest, user: AuthUser = Depends(get_c
     Events: {"t": token}, {"sources": [...]}, {"faithfulness": {...}}, {"error": msg}, then [DONE].
     """
     cfg = load_config()
-    history = request.history or []
+    history = request.history_dicts()
 
     def event_stream():
         try:

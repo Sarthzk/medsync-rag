@@ -610,7 +610,11 @@ def ingest_report(cfg: MedSyncConfig, user_id: str, *, filename: str, storage_pa
     if not data:
         raise ValueError("Uploaded file is empty.")
     file_hash = sha256_bytes(data)
+    previous = store.get_report_by_filename(user_id, filename)
     report = store.upsert_report(user_id, filename, storage_path, file_hash)
+    if previous and previous.get("storage_path") and previous["storage_path"] != storage_path:
+        # Same display name re-uploaded: the row now points at the new file, so drop the old one.
+        store.remove_objects([previous["storage_path"]])
     report_id = report["id"]
 
     try:
@@ -881,6 +885,8 @@ def _rerank_documents(question: str, docs: list[Document], *, top_n: int) -> lis
         return docs
 
     limited_n = min(top_n, len(docs))
+    if not (os.getenv("COHERE_API_KEY") or "").strip():
+        return docs[:limited_n]
     try:
         return _cohere_rerank_documents(question, docs, top_n=limited_n)
     except Exception:

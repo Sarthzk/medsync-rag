@@ -36,6 +36,12 @@ class FakeStore:
     def download_report(self, storage_path):
         return b"image-bytes"
 
+    def get_report_by_filename(self, user_id, filename):
+        return None
+
+    def remove_objects(self, paths):
+        pass
+
     def upsert_report(self, user_id, filename, storage_path, sha256):
         self.upserts.append((user_id, filename, storage_path, sha256))
         return {"id": "rep-1", "filename": filename, "storage_path": storage_path, "sha256": sha256}
@@ -283,3 +289,36 @@ def test_stream_skips_retrieval_for_conversation(monkeypatch, cfg):
 
     assert [e["text"] for e in events] == ["Hi", "!"]
     assert store.match_calls == []
+
+
+def test_reupload_with_same_name_removes_previous_storage_object(monkeypatch, cfg, embeddings):
+    store = FakeStore(cached_report={"structured_report": dict(STRUCTURED)})
+    store.previous = {"id": "rep-1", "storage_path": f"{USER}/1-old-scan.png"}
+    store.removed = []
+    store.get_report_by_filename = lambda user_id, filename: store.previous
+    store.remove_objects = lambda paths: store.removed.extend(paths)
+    monkeypatch.setattr(rag, "store", store)
+
+    rag.ingest_report(cfg, USER, filename="scan.png", storage_path=f"{USER}/2-new-scan.png")
+
+    assert store.removed == [f"{USER}/1-old-scan.png"]
+
+
+def test_first_upload_removes_nothing(monkeypatch, cfg, embeddings):
+    store = FakeStore(cached_report={"structured_report": dict(STRUCTURED)})
+    store.removed = []
+    store.get_report_by_filename = lambda user_id, filename: None
+    store.remove_objects = lambda paths: store.removed.extend(paths)
+    monkeypatch.setattr(rag, "store", store)
+
+    rag.ingest_report(cfg, USER, filename="scan.png", storage_path=f"{USER}/2-scan.png")
+
+    assert store.removed == []
+
+
+def test_rerank_without_cohere_key_is_quiet(monkeypatch, caplog):
+    monkeypatch.delenv("COHERE_API_KEY", raising=False)
+    docs = [Document(page_content=str(i)) for i in range(8)]
+    with caplog.at_level("WARNING", logger="medsync"):
+        assert rag._rerank_documents("q", docs, top_n=5) == docs[:5]
+    assert caplog.records == []

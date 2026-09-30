@@ -77,6 +77,19 @@ def upsert_report(user_id: str, filename: str, storage_path: str, sha256: str) -
     return (res.data or [row])[0]
 
 
+def get_report_by_filename(user_id: str, filename: str) -> dict | None:
+    res = (
+        get_supabase()
+        .table(TABLE_REPORTS)
+        .select(_REPORT_COLUMNS)
+        .eq("user_id", user_id)
+        .eq("filename", filename)
+        .limit(1)
+        .execute()
+    )
+    return (res.data or [None])[0]
+
+
 def get_report_by_sha(user_id: str, sha256: str) -> dict | None:
     """Most recent successfully extracted report with identical content (extraction cache)."""
     res = (
@@ -228,7 +241,8 @@ def _delete_reminders(user_id: str, filenames: list[str]) -> int:
         return 0
 
 
-def _remove_objects(paths: list[str]) -> None:
+def remove_objects(paths: list[str]) -> None:
+    """Best-effort removal of Storage objects (failures are logged, not raised)."""
     if not paths:
         return
     try:
@@ -243,7 +257,7 @@ def delete_report(user_id: str, report_id: str) -> dict | None:
     if report is None:
         return None
 
-    _remove_objects([report["storage_path"]])
+    remove_objects([report["storage_path"]])
     get_supabase().table(TABLE_REPORTS).delete().eq("user_id", user_id).eq("id", report_id).execute()
     reminders = _delete_reminders(user_id, [report["filename"]])
     return {"deleted": report["filename"], "medication_reminders_cleaned": reminders}
@@ -252,7 +266,7 @@ def delete_report(user_id: str, report_id: str) -> dict | None:
 def delete_all_for_user(user_id: str) -> dict:
     """Deletes every report, chunk, stored file and report-linked reminder of the user."""
     reports = list_reports(user_id)
-    _remove_objects([r["storage_path"] for r in reports])
+    remove_objects([r["storage_path"] for r in reports])
     get_supabase().table(TABLE_REPORTS).delete().eq("user_id", user_id).execute()
     reminders = _delete_reminders(user_id, [r["filename"] for r in reports])
     return {"deleted_reports": len(reports), "medication_reminders_cleaned": reminders}

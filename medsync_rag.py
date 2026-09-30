@@ -64,6 +64,8 @@ class MedSyncConfig:
     """Central runtime configuration for backend pipeline behavior."""
 
     chat_model: str = "gpt-4o-mini"
+    # Small/fast model for routing helpers: intent classifier, metadata filter, HyDE.
+    router_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
 
     # If enabled, /chat can answer without using the chat model (retrieval-only).
@@ -89,6 +91,7 @@ def load_config() -> MedSyncConfig:
     """Loads runtime config from environment variables (`.env` is loaded by main.py)."""
     return MedSyncConfig(
         chat_model=os.getenv("MEDSYNC_CHAT_MODEL", "gpt-4o-mini"),
+        router_model=os.getenv("MEDSYNC_ROUTER_MODEL", "gpt-4o-mini"),
         embedding_model=os.getenv("MEDSYNC_EMBED_MODEL", "text-embedding-3-small"),
         llm_disabled=_truthy_env("MEDSYNC_LLM_DISABLED", "false"),
         temperature=float(os.getenv("MEDSYNC_TEMPERATURE", "0") or 0),
@@ -257,7 +260,7 @@ def _extract_structured_report_from_text(cfg: MedSyncConfig, raw_text: str, *, s
 
     try:
         require_openai_key()
-        llm = ChatOpenAI(model=cfg.chat_model, temperature=0, max_tokens=500)
+        llm = ChatOpenAI(model=cfg.chat_model, temperature=0, max_tokens=2000)
         system = SystemMessage(
             content=(
                 "Transform medical report text into strict JSON.\n"
@@ -269,13 +272,11 @@ def _extract_structured_report_from_text(cfg: MedSyncConfig, raw_text: str, *, s
                 '  "diagnoses": string[],\n'
                 '  "medications": string[],\n'
                 '  "lab_results": [{"name": string, "value": string, "unit": string, "reference_range": string, "flag": string}],\n'
-                '  "doctor_notes": string,\n'
-                '  "raw_text": string\n'
+                '  "doctor_notes": string\n'
                 "}\n"
                 "Rules:\n"
                 "- Use empty string/empty array for unknown values.\n"
                 "- report_date should be YYYY-MM-DD when possible.\n"
-                "- raw_text should contain the full plain text content of the report when available, or empty string if unavailable.\n"
                 "- Do not include extra keys."
             )
         )
@@ -283,7 +284,10 @@ def _extract_structured_report_from_text(cfg: MedSyncConfig, raw_text: str, *, s
         raw = llm.invoke([system, human]).content
         if not isinstance(raw, str):
             raw = str(raw)
-        return _sanitize_structured_report(_extract_json_object(raw))
+        structured = _sanitize_structured_report(_extract_json_object(raw))
+        # The source text is already known; don't spend output tokens having the model echo it.
+        structured["raw_text"] = text
+        return structured
     except Exception:
         logger.warning("Structured extraction from text failed.", exc_info=True)
         return _default_structured_report()
@@ -410,7 +414,7 @@ def _extract_structured_report_from_image_b64_with_vision(
             },
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64_image}", "detail": "low"},
+                "image_url": {"url": f"data:image/jpeg;base64,{b64_image}", "detail": "high"},
             },
         ]
     )
@@ -755,7 +759,7 @@ def _normalize_intent_label(raw: str) -> IntentLabel:
 
 @lru_cache(maxsize=500)
 def _classify_intent_cached(
-    history_text: str, normalized_question: str, llm_disabled: bool
+    history_text: str, normalized_question: str, llm_disabled: bool, model: str
 ) -> IntentLabel:
     lower_q = normalized_question.lower()
     pure_greeting_patterns = [
@@ -773,7 +777,7 @@ def _classify_intent_cached(
         return "RETRIEVAL"
 
     require_openai_key()
-    classifier = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_tokens=8)
+    classifier = ChatOpenAI(model=model, temperature=0, max_tokens=8)
     system = SystemMessage(
         content=(
             "Classify the user query intent for a medical assistant.\n"
@@ -810,7 +814,14 @@ def _classify_intent(
         return "CONVERSATIONAL"
 
     history_text = _history_to_text(history, max_turns=5)
-    return _classify_intent_cached(history_text, normalized_question.lower(), cfg.llm_disabled)
+    try:
+        return _classify_intent_cached(
+            history_text, normalized_question.lower(), cfg.llm_disabled, cfg.router_model
+        )
+    except Exception:
+        # Retrieval is the safe default: it grounds answers in the user's reports.
+        logger.warning("Intent classification failed; defaulting to RETRIEVAL.", exc_info=True)
+        return "RETRIEVAL"
 
 
 def _cohere_rerank_documents(
@@ -915,7 +926,7 @@ def _build_metadata_filter(
 
     try:
         require_openai_key()
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_tokens=120)
+        llm = ChatOpenAI(model=cfg.router_model, temperature=0, max_tokens=120)
         system = SystemMessage(
             content=(
                 "Extract optional retrieval filters from the query.\n"
@@ -989,7 +1000,7 @@ def _build_hyde_query(
 
     try:
         require_openai_key()
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_tokens=220)
+        llm = ChatOpenAI(model=cfg.router_model, temperature=0, max_tokens=220)
         system = SystemMessage(
             content=(
                 "Write a concise hypothetical medical report excerpt that would answer the user query.\n"

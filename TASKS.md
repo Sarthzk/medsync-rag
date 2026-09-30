@@ -216,6 +216,12 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 
 ## Phase 3 — Deploy on Vercel
 
+> ⏸️ **ON HOLD (since 2026-09-30) — waiting on you.** Nothing below can be done without your
+> Vercel/GitHub access. Pending: (1) OK to `git push -u origin vercel-migration`,
+> (2) create the `medsync-api` Vercel project, (3) point the existing frontend project's
+> Preview `BACKEND_API_BASE_URL` at it, (4) browser click-through, then merge + retire Railway.
+> Also pending from Task 8: one manual Vault click-through in the browser.
+
 ### Task 9: Deploy `medsync-api`
 - [ ] **(You)** Vercel → New Project → import repo → name `medsync-api`, **Root Directory `/`**, Framework "Other".
 - [ ] Env vars: `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CORS_ALLOW_ORIGINS=https://<web-domain>`, optional `COHERE_API_KEY`, `LOG_LEVEL=INFO`.
@@ -237,10 +243,10 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 ## Phase 4 — Remaining review fixes
 
 ### Task 12: Extraction quality
-- [ ] Text-path structuring: stop asking the model to echo `raw_text` (we already have it from PyMuPDF — set it locally), raise `max_tokens` to 2000.
-- [ ] Vision: `"detail": "high"`.
-- [ ] Intent classifier wrapped in try/except → default `RETRIEVAL`; use `cfg.chat_model`-family setting instead of hardcoded model.
-- [ ] Tests for the text path using a monkeypatched LLM. Commit.
+- [x] Text-path structuring: stop asking the model to echo `raw_text` (we already have it from PyMuPDF — set it locally), raise `max_tokens` to 2000.
+- [x] Vision: `"detail": "high"`.
+- [x] Intent classifier wrapped in try/except → default `RETRIEVAL`; new `router_model` setting (`MEDSYNC_ROUTER_MODEL`) replaces the hardcoded model in classifier, filter and HyDE.
+- [x] Tests for the text path using a monkeypatched LLM. Live check: 24-lab text PDF now stays on the text path (previously fell back to vision). Commit.
 
 ### Task 13: Chat UX correctness
 - [ ] Cut time-to-first-token (~11 s measured): run metadata-filter and HyDE LLM calls concurrently; skip HyDE for short factual questions.

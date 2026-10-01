@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
 export const getBackendBaseUrl = (): string | null => {
-  const envUrl = process.env.BACKEND_API_BASE_URL?.trim();
+  // BACKEND_API_URL is the name the existing Vercel project already uses.
+  const envUrl =
+    process.env.BACKEND_API_BASE_URL?.trim() || process.env.BACKEND_API_URL?.trim();
   if (envUrl) return envUrl.replace(/\/+$/, "");
   // Local development convenience only; production must configure the URL.
   return process.env.NODE_ENV === "production" ? null : "http://127.0.0.1:8000";

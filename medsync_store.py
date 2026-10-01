@@ -14,6 +14,7 @@ async callers should wrap them in `run_in_threadpool`.
 import logging
 
 from langchain_core.documents import Document
+from postgrest.exceptions import APIError
 
 from medsync_auth import get_supabase
 
@@ -68,12 +69,23 @@ def upsert_report(user_id: str, filename: str, storage_path: str, sha256: str) -
         "status": "pending",
         "error": None,
     }
-    res = (
-        get_supabase()
-        .table(TABLE_REPORTS)
-        .upsert(row, on_conflict="user_id,filename")
-        .execute()
-    )
+    def _upsert():
+        return (
+            get_supabase()
+            .table(TABLE_REPORTS)
+            .upsert(row, on_conflict="user_id,filename")
+            .execute()
+        )
+
+    try:
+        res = _upsert()
+    except APIError as exc:
+        # Two simultaneous inserts of the same report (a duplicated request) can trip the
+        # storage_path unique index, which ON CONFLICT (user_id, filename) doesn't arbitrate.
+        # Once the other insert commits, a retry resolves to a normal update.
+        if getattr(exc, "code", None) != "23505":
+            raise
+        res = _upsert()
     return (res.data or [row])[0]
 
 

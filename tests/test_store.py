@@ -148,3 +148,44 @@ def test_replace_chunks_is_idempotent_upsert_then_trims_stale(monkeypatch):
     # Stale chunks from a longer previous version are removed *after* the upsert.
     assert ops.index("upsert") < ops.index("delete")
     assert ("report_chunks", "gte", ("chunk_index", 2), {}) in log
+
+
+def test_upsert_report_retries_once_on_concurrent_unique_violation(monkeypatch):
+    from postgrest.exceptions import APIError
+
+    attempts = []
+
+    class Query:
+        def upsert(self, row, on_conflict):
+            return self
+
+        def execute(self):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise APIError({"message": "duplicate key value violates unique constraint", "code": "23505"})
+            return type("R", (), {"data": [{"id": "rep-1", "status": "pending"}]})()
+
+    fake = type("SB", (), {"table": lambda self, name: Query()})()
+    monkeypatch.setattr(medsync_store, "get_supabase", lambda: fake)
+
+    row = medsync_store.upsert_report(USER, "a.pdf", f"{USER}/1-a.pdf", "sha")
+
+    assert row["id"] == "rep-1"
+    assert len(attempts) == 2
+
+
+def test_upsert_report_does_not_swallow_other_errors(monkeypatch):
+    from postgrest.exceptions import APIError
+
+    class Query:
+        def upsert(self, row, on_conflict):
+            return self
+
+        def execute(self):
+            raise APIError({"message": "permission denied", "code": "42501"})
+
+    fake = type("SB", (), {"table": lambda self, name: Query()})()
+    monkeypatch.setattr(medsync_store, "get_supabase", lambda: fake)
+
+    with pytest.raises(APIError):
+        medsync_store.upsert_report(USER, "a.pdf", f"{USER}/1-a.pdf", "sha")

@@ -167,13 +167,17 @@ def replace_chunks(
     chunks: list[tuple[str, dict]],
     embeddings: list[list[float]],
 ) -> int:
-    """Replaces all chunks of a report with the given (content, metadata) + embeddings."""
+    """
+    Replaces all chunks of a report with the given (content, metadata) + embeddings.
+
+    Idempotent under concurrency: rows are upserted on (report_id, chunk_index) and only
+    then are leftover higher-index chunks removed, so a duplicate ingest of the same report
+    (e.g. a retried POST) converges on the same rows instead of failing a unique constraint.
+    """
     if len(chunks) != len(embeddings):
         raise ValueError("chunks and embeddings must have the same length")
 
     sb = get_supabase()
-    sb.table(TABLE_CHUNKS).delete().eq("user_id", user_id).eq("report_id", report_id).execute()
-
     rows = [
         {
             "report_id": report_id,
@@ -186,7 +190,17 @@ def replace_chunks(
         for i, ((content, metadata), embedding) in enumerate(zip(chunks, embeddings))
     ]
     for start in range(0, len(rows), _INSERT_BATCH):
-        sb.table(TABLE_CHUNKS).insert(rows[start : start + _INSERT_BATCH]).execute()
+        sb.table(TABLE_CHUNKS).upsert(
+            rows[start : start + _INSERT_BATCH], on_conflict="report_id,chunk_index"
+        ).execute()
+    (
+        sb.table(TABLE_CHUNKS)
+        .delete()
+        .eq("user_id", user_id)
+        .eq("report_id", report_id)
+        .gte("chunk_index", len(rows))
+        .execute()
+    )
     return len(rows)
 
 

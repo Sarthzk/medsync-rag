@@ -106,3 +106,45 @@ def test_delete_user_storage_removes_everything_in_users_folder(monkeypatch):
 
     assert medsync_store.delete_user_storage(USER) == 2
     assert removed == [f"{USER}/a.pdf", f"{USER}/b.png"]
+
+
+class _RecordingQuery:
+    """Chainable stand-in for a postgrest query builder that records each call."""
+
+    def __init__(self, log, table):
+        self.log, self.table = log, table
+
+    def __getattr__(self, name):
+        def call(*args, **kwargs):
+            self.log.append((self.table, name, args, kwargs))
+            return self
+
+        return call
+
+    def execute(self):
+        self.log.append((self.table, "execute", (), {}))
+        return type("R", (), {"data": []})()
+
+
+def test_replace_chunks_is_idempotent_upsert_then_trims_stale(monkeypatch):
+    log = []
+    fake = type("SB", (), {"table": lambda self, name: _RecordingQuery(log, name)})()
+    monkeypatch.setattr(medsync_store, "get_supabase", lambda: fake)
+
+    n = medsync_store.replace_chunks(
+        USER, "rep-1", [("a", {"source": "x.pdf"}), ("b", {"source": "x.pdf"})], [[0.1], [0.2]]
+    )
+
+    assert n == 2
+    ops = [entry[1] for entry in log if entry[1] != "execute"]
+    # Rows are written with an upsert keyed on (report_id, chunk_index): a duplicate,
+    # concurrent ingest of the same report converges instead of hitting a unique violation.
+    upserts = [entry for entry in log if entry[1] == "upsert"]
+    assert len(upserts) == 1
+    rows = upserts[0][2][0]
+    assert [r["chunk_index"] for r in rows] == [0, 1]
+    assert upserts[0][3] == {"on_conflict": "report_id,chunk_index"}
+    assert "insert" not in ops
+    # Stale chunks from a longer previous version are removed *after* the upsert.
+    assert ops.index("upsert") < ops.index("delete")
+    assert ("report_chunks", "gte", ("chunk_index", 2), {}) in log

@@ -71,3 +71,23 @@ def test_get_current_user_401_without_header():
     with pytest.raises(HTTPException) as exc:
         asyncio.run(get_current_user(None))
     assert exc.value.status_code == 401
+
+
+def test_get_supabase_gives_each_thread_its_own_client(monkeypatch):
+    """HTTP/2 connections in the Supabase client aren't safe to share across threads."""
+    import threading
+
+    created = []
+    monkeypatch.setattr(medsync_auth, "create_client", lambda url, key: created.append(object()) or created[-1])
+    monkeypatch.setattr(medsync_auth, "_thread_clients", threading.local())
+
+    main_a = medsync_auth.get_supabase()
+    main_b = medsync_auth.get_supabase()
+    other = []
+    t = threading.Thread(target=lambda: other.append(medsync_auth.get_supabase()))
+    t.start()
+    t.join()
+
+    assert main_a is main_b  # reused within a thread
+    assert other[0] is not main_a  # never shared across threads
+    assert len(created) == 2

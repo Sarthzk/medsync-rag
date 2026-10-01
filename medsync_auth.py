@@ -8,6 +8,7 @@ asymmetric JWT signing keys without configuring a JWT secret.
 
 import logging
 import os
+import threading
 from dataclasses import dataclass
 
 from fastapi import Header, HTTPException
@@ -16,7 +17,10 @@ from supabase import Client, create_client
 
 logger = logging.getLogger("medsync.auth")
 
-_SUPABASE_CLIENT: Client | None = None
+# One client per thread: the Supabase client keeps HTTP/2 connections, which fail
+# intermittently (httpx ReadError) when shared by concurrent threads. Blocking calls run in
+# a thread pool, and Fluid Compute serves concurrent requests from the same instance.
+_thread_clients = threading.local()
 
 
 @dataclass(frozen=True)
@@ -26,10 +30,10 @@ class AuthUser:
 
 
 def get_supabase() -> Client:
-    """Create/reuse a service-role Supabase client from environment variables."""
-    global _SUPABASE_CLIENT
-    if _SUPABASE_CLIENT is not None:
-        return _SUPABASE_CLIENT
+    """Create/reuse this thread's service-role Supabase client from environment variables."""
+    client = getattr(_thread_clients, "client", None)
+    if client is not None:
+        return client
 
     url = (os.getenv("SUPABASE_URL") or "").strip()
     key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
@@ -37,8 +41,8 @@ def get_supabase() -> Client:
         raise RuntimeError(
             "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
         )
-    _SUPABASE_CLIENT = create_client(url, key)
-    return _SUPABASE_CLIENT
+    _thread_clients.client = create_client(url, key)
+    return _thread_clients.client
 
 
 def _unauthorized(detail: str) -> HTTPException:

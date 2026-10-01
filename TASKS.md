@@ -288,3 +288,10 @@ New surface (all require `Depends(get_current_user)` except `GET /`):
 - [x] Verified: anon sees 0 rows in all 5 tables and can't insert; users can upsert their own settings/reminders; cross-user reads/writes and `user_id` reassignment are blocked; API vitals endpoints unaffected; performance WARN lints 14 → 0.
 - [ ] Optional (dashboard): enable Leaked Password Protection (Authentication → settings).
 
+### Task 17: Preview verification (2026-10-01)
+- [x] Frontend Preview env `BACKEND_API_BASE_URL` (branch `vercel-migration` only) → https://medsync-api-git-vercel-migration-sarthzks-projects.vercel.app; production still on Railway.
+- [x] Fixed: frontend now also reads the project's existing `BACKEND_API_URL` (merge would otherwise 503 every API call).
+- [x] Click-through on the preview in Chrome: login, Vault upload/preview/delete, chat with sources + source check, vitals (incl. 0 values).
+- [x] Bug found on preview: one upload produced two concurrent ingest requests → chunk unique-key race marked a good report `failed`. Reproduced live (2/3), fixed with idempotent chunk upserts; also found + fixed shared-client HTTP/2 ReadError (per-thread clients) and a rare report-upsert unique violation (single retry). Live race 4×6: 24/24 ready.
+- [ ] Follow-up: failed reports show the raw database error text in the Vault; store a user-friendly message instead.
+

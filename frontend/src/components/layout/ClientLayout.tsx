@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import Sidebar from "./Sidebar";
 import { createClient } from "@/lib/supabase";
+import { isPublicPath } from "@/lib/authPaths";
 import Footer from "./Footer";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
@@ -32,7 +33,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   };
   
   // Hide sidebar on Login and Signup pages
-  const isAuthPage = pathname === "/login" || pathname === "/signup";
+  const isAuthPage = isPublicPath(pathname);
   // Chat is a full-height app view; a footer below it would push its header off-screen.
   const hideFooter = pathname === "/chat";
   isAuthPageRef.current = isAuthPage;

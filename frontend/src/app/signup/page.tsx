@@ -10,6 +10,7 @@ export default function SignUpPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkEmail, setCheckEmail] = useState(false);
   // Set by Settings after account deletion; read from the URL on the client only.
   const accountDeleted = useSyncExternalStore(
     () => () => {},
@@ -37,13 +38,14 @@ export default function SignUpPage() {
 
     try {
       // Sign up the user with Supabase
-      const { error: signUpError } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             full_name: name,
-            blood_type: blood_type || null,
+            blood_type: blood_type || "",
           },
         },
       });
@@ -54,8 +56,15 @@ export default function SignUpPage() {
         return;
       }
 
-      // Success - redirect to login
-      router.push("/login");
+      if (data.session) {
+        // Email confirmation is off: the user is already signed in.
+        router.replace("/");
+        router.refresh();
+        return;
+      }
+      // Confirmation required: nothing more to do until they click the emailed link.
+      setCheckEmail(true);
+      setIsLoading(false);
     } catch (err) {
       console.error("Sign up error:", err);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
@@ -90,6 +99,12 @@ export default function SignUpPage() {
           {accountDeleted && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm text-emerald-800">
               Your account and all of its data have been permanently deleted.
+            </div>
+          )}
+
+          {checkEmail && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm text-emerald-800">
+              Almost done. We sent a confirmation link to your email. Open it to activate your account, then sign in.
             </div>
           )}
 
@@ -130,7 +145,7 @@ export default function SignUpPage() {
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                    <input required type="password" name="password" placeholder="••••••••" className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 outline-none focus:border-[#FFB4A2] text-sm font-medium" />
+                    <input required type="password" name="password" minLength={8} autoComplete="new-password" placeholder="8+ characters" className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 outline-none focus:border-[#FFB4A2] text-sm font-medium" />
                   </div>
                </div>
             </div>

@@ -5,11 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase";
+import { safeNext } from "@/lib/authPaths";
+import { useQueryParam } from "@/lib/useQueryParam";
 
 export default function LoginPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nextParam = useQueryParam("next");
+  const linkExpired = useQueryParam("error") === "link_expired";
   const supabase = createClient();
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -39,8 +43,9 @@ export default function LoginPage() {
         return;
       }
 
-      // Success - redirect to home page
-      router.push("/");
+      // Success: continue to the page that sent us here (same-site paths only).
+      router.replace(safeNext(nextParam));
+      router.refresh();
     } catch (err) {
       console.error("Login error:", err);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
@@ -79,6 +84,11 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
+            {linkExpired && !error && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
+                That email link is invalid or has expired. Sign in, or request a new reset link.
+              </div>
+            )}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
                 <p className="text-red-700 text-sm font-medium">{error}</p>
@@ -94,7 +104,12 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
+                <Link href="/forgot-password" className="text-[10px] font-bold text-[#2D6A4F] uppercase tracking-widest hover:underline">
+                  Forgot?
+                </Link>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
                 <input required type="password" name="password" placeholder="••••••••" className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 outline-none focus:border-[#FFB4A2] text-sm font-medium" />

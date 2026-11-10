@@ -33,3 +33,4 @@ See [SETUP.md](SETUP.md) for local development and deployment.
 - The project is designed for personal health records and report-based Q&A.
 - The backend and frontend are separated, with the frontend proxying API calls to FastAPI.
 - For local development, use the setup instructions in the repository files.
+- Work in progress rn

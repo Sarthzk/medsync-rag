@@ -1,10 +1,12 @@
-/** Model ids go through the Vercel AI Gateway as "provider/model" strings; override per environment if needed. */
+import { openai } from "@ai-sdk/openai";
+
+/** OpenAI direct (OPENAI_API_KEY); gpt-4o-mini keeps cost to cents per day at the quotas below. */
 export const ragConfig = {
-  chatModel: process.env.MEDSYNC_CHAT_MODEL || "openai/gpt-4o-mini",
+  chatModel: openai(process.env.MEDSYNC_CHAT_MODEL || "gpt-4o-mini"),
   /** Small, fast model for the intent classifier, metadata filter and HyDE. */
-  routerModel: process.env.MEDSYNC_ROUTER_MODEL || "openai/gpt-4o-mini",
+  routerModel: openai(process.env.MEDSYNC_ROUTER_MODEL || "gpt-4o-mini"),
   /** Must produce 1536 dimensions to match report_chunks.embedding. */
-  embeddingModel: process.env.MEDSYNC_EMBED_MODEL || "openai/text-embedding-3-small",
+  embeddingModel: openai.embedding("text-embedding-3-small"),
   temperature: 0,
   maxConversationalTokens: 400,
   maxMedicalRagTokens: 1200,

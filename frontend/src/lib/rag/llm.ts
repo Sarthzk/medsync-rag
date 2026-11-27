@@ -1,9 +1,9 @@
-import { embed, embedMany, generateText } from "ai";
+import { embed, embedMany, generateText, type LanguageModel } from "ai";
 import { ragConfig } from "./config";
 
 /** One non-streaming completion, trimmed. */
 export async function complete(opts: {
-  model: string;
+  model: LanguageModel;
   system: string;
   prompt: string;
   maxOutputTokens: number;

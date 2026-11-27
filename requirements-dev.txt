@@ -1,5 +1,0 @@
--r requirements.txt
-pytest
-pyflakes
-httpx
-uvicorn[standard]

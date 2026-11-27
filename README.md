@@ -26,7 +26,16 @@ Website: [Visit the live app](https://medsync-rag.vercel.app/)
 3. The report is split into chunks, embedded, and stored in pgvector — tagged with the user's id.
 4. Chat retrieves only that user's most relevant chunks and answers from them, citing sources.
 
-See [SETUP.md](SETUP.md) for local development and deployment.
+## Run it locally
+
+```bash
+cd frontend
+cp .env.example .env.local   # Supabase URL + keys, OPENAI_API_KEY
+npm install
+npm run dev                  # http://localhost:3000
+```
+
+Apply the SQL files in `supabase/migrations/` (in order) to your Supabase project. In Supabase set Authentication → Providers → Email on, and keep a CAPTCHA enabled under Attack Protection because signup is open. Deploy by importing the repo into Vercel with root directory `frontend` and the same environment variables.
 
 ## Notes
 

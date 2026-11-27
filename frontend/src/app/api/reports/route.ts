@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isErrorResponse, jsonError, requireUser } from "@/lib/server/auth";
-import { BUCKET, deleteAllReports } from "@/lib/server/reports";
+import { BUCKET, deleteAllReports, expireStaleReports } from "@/lib/server/reports";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   const ctx = await requireUser(request);
   if (isErrorResponse(ctx)) return ctx;
 
+  await expireStaleReports(ctx.supabase);
   const { data, error } = await ctx.supabase
     .from("reports")
     .select("id, filename, storage_path, status, error, created_at")

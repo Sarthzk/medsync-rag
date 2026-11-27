@@ -141,7 +141,7 @@ export function sanitizeStructuredReport(parsed: unknown): StructuredReport {
   };
 }
 
-/** Metadata stored on every chunk; powers the retrieval filters (patient, date, type). */
+/** Metadata stored on every chunk; only what the retrieval filters match on (patient, date, type). */
 export function structuredReportMetadata(report: StructuredReport): Record<string, string> {
   const patientName = (report.patient_name ?? "").trim();
   const reportDate = normalizeReportDate((report.report_date ?? "").trim());
@@ -154,44 +154,7 @@ export function structuredReportMetadata(report: StructuredReport): Record<strin
     report_year_month: reportDate ? reportDate.slice(0, 7) : "",
     report_type: reportType,
     report_type_norm: toNormToken(reportType),
-    diagnoses_json: JSON.stringify(report.diagnoses ?? []),
-    medications_json: JSON.stringify(report.medications ?? []),
-    lab_results_json: JSON.stringify(report.lab_results ?? []),
-    doctor_notes: (report.doctor_notes ?? "").trim(),
   };
-}
-
-/** Merges per-page reports (scanned PDFs are read page by page) into one document-level report. */
-export function mergeStructuredReports(reports: StructuredReport[]): StructuredReport {
-  const merged = defaultStructuredReport();
-  const seenLabs = new Set<string>();
-
-  for (const rep of reports) {
-    if (!merged.patient_name && rep.patient_name) merged.patient_name = rep.patient_name;
-    if (!merged.report_date && rep.report_date) merged.report_date = normalizeReportDate(rep.report_date);
-    if (!merged.report_type && rep.report_type) merged.report_type = rep.report_type;
-
-    for (const diagnosis of rep.diagnoses ?? []) {
-      if (diagnosis && !merged.diagnoses.includes(diagnosis)) merged.diagnoses.push(diagnosis);
-    }
-    for (const medication of rep.medications ?? []) {
-      if (medication && !merged.medications.includes(medication)) merged.medications.push(medication);
-    }
-    for (const lab of rep.lab_results ?? []) {
-      const key = JSON.stringify([lab.name, lab.value, lab.unit, lab.reference_range, lab.flag]);
-      if (!seenLabs.has(key)) {
-        seenLabs.add(key);
-        merged.lab_results.push(lab);
-      }
-    }
-
-    const notes = (rep.doctor_notes ?? "").trim();
-    if (notes) merged.doctor_notes = merged.doctor_notes ? `${merged.doctor_notes}\n\n${notes}` : notes;
-
-    const pageText = (rep.raw_text ?? "").trim();
-    if (pageText) merged.raw_text = merged.raw_text ? `${merged.raw_text}\n\n${pageText}` : pageText;
-  }
-  return sanitizeStructuredReport(merged);
 }
 
 /** Readable markdown of the structured fields, used as the embedding text for images and scanned PDFs. */

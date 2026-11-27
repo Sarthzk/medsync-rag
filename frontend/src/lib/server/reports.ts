@@ -17,11 +17,23 @@ export function ownedStoragePath(userId: string, storagePath: string): string | 
   return path;
 }
 
-/** Best-effort removal of Storage objects; failures are logged, never thrown. */
+/** Removes Storage objects; throws on failure so callers keep the row and the user can retry (missing objects are fine). */
 export async function removeObjects(supabase: SupabaseClient, paths: string[]): Promise<void> {
   if (!paths.length) return;
   const { error } = await supabase.storage.from(BUCKET).remove(paths);
-  if (error) console.warn(`Storage removal failed for ${paths.length} objects:`, error.message);
+  if (error) throw new Error(`Storage removal failed: ${error.message}`);
+}
+
+const STALE_AFTER_MS = 6 * 60 * 1000;
+
+/** Marks reports whose background job died (still `processing` past the 5 minute function limit) as failed. */
+export async function expireStaleReports(supabase: SupabaseClient): Promise<void> {
+  const { error } = await supabase
+    .from("reports")
+    .update({ status: "failed", error: "Processing timed out. Please upload the file again." })
+    .eq("status", "processing")
+    .lt("updated_at", new Date(Date.now() - STALE_AFTER_MS).toISOString());
+  if (error) console.warn("Could not expire stale reports:", error.message);
 }
 
 /** Removes medication reminders that point at deleted report files; returns how many were removed. */
@@ -44,7 +56,7 @@ export async function deleteReminders(
   return data?.length ?? 0;
 }
 
-/** Deletes every report (rows, chunks and lab results cascade), stored file and linked reminder of the user. */
+/** Deletes every stored file first, then every report row (chunks and lab results cascade) and linked reminder. */
 export async function deleteAllReports(supabase: SupabaseClient, userId: string) {
   const { data: reports, error } = await supabase
     .from("reports")

@@ -36,32 +36,46 @@ export async function POST(request: Request) {
   const storagePath = ownedStoragePath(user.id, parsed.data.storage_path);
   if (!storagePath) return jsonError(400, "Invalid storage path.");
 
-  // A repeated POST for the same upload must not start a second run.
-  const { data: existing } = await supabase
-    .from("reports")
-    .select("id, status")
-    .eq("user_id", user.id)
-    .eq("storage_path", storagePath)
-    .maybeSingle();
-  if (existing && existing.status !== "failed") {
-    return NextResponse.json(
-      { status: existing.status, report_id: existing.id, file: filename },
-      { status: existing.status === "ready" ? 200 : 202 }
+  const respond = (r: { id: string; status: string }) =>
+    NextResponse.json(
+      { status: r.status, report_id: r.id, file: filename },
+      { status: r.status === "ready" ? 200 : 202 }
     );
-  }
+  const find = () =>
+    supabase
+      .from("reports")
+      .select("id, filename, storage_path, status")
+      .eq("user_id", user.id)
+      .eq("storage_path", storagePath)
+      .maybeSingle();
+
+  // A repeated POST for the same upload must not start a second run.
+  const { data: existing } = await find();
+  if (existing && existing.status !== "failed") return respond(existing);
 
   const blocked = await consumeQuota(supabase, "ingest");
   if (blocked) return blocked;
 
-  const { data: report, error } = await supabase
-    .from("reports")
-    .upsert(
-      { user_id: user.id, filename, storage_path: storagePath, status: "processing", error: null },
-      { onConflict: "user_id,storage_path" }
-    )
-    .select("id, filename, storage_path")
-    .single();
-  if (error || !report) {
+  const columns = "id, filename, storage_path, status";
+  const { data: report, error } = existing
+    ? // Retry of a failed run; only one of two simultaneous retries can flip it back to processing.
+      await supabase
+        .from("reports")
+        .update({ status: "processing", error: null })
+        .eq("id", existing.id)
+        .eq("status", "failed")
+        .select(columns)
+        .maybeSingle()
+    : await supabase
+        .from("reports")
+        .insert({ user_id: user.id, filename, storage_path: storagePath, status: "processing" })
+        .select(columns)
+        .single();
+
+  if (!report) {
+    // Lost a race to a simultaneous request for the same upload (unique violation or already retried): it owns the run.
+    const { data: winner } = await find();
+    if (winner && (!error || error.code === "23505")) return respond(winner);
     console.error("could not register report:", error?.message);
     return jsonError(500, "Report processing failed. Please try again.");
   }

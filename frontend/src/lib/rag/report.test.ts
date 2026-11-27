@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   defaultStructuredReport,
   extractJsonObject,
-  mergeStructuredReports,
   normalizeReportDate,
   sanitizeStructuredReport,
   structuredReportMetadata,
@@ -98,46 +97,13 @@ describe("structuredReportMetadata", () => {
     expect(meta.patient_name_norm).toBe("asha rao");
     expect(meta.report_year_month).toBe("2024-03");
     expect(meta.report_type_norm).toBe("blood test");
-    expect(JSON.parse(meta.diagnoses_json)).toEqual(["Anaemia"]);
+    expect(Object.keys(meta).sort()).toEqual(
+      ["patient_name", "patient_name_norm", "report_date", "report_type", "report_type_norm", "report_year_month"]
+    );
   });
 
   it("leaves the month empty without a date", () => {
     expect(structuredReportMetadata(defaultStructuredReport()).report_year_month).toBe("");
-  });
-});
-
-describe("mergeStructuredReports", () => {
-  it("combines pages, keeping first-seen header fields and de-duplicating lists", () => {
-    const page1 = sanitizeStructuredReport({
-      patient_name: "Asha Rao",
-      diagnoses: ["Anaemia"],
-      medications: ["Iron"],
-      lab_results: [{ name: "Hb", value: "10", unit: "g/dL", reference_range: "12-16", flag: "L" }],
-      doctor_notes: "Rest.",
-      raw_text: "page one",
-    });
-    const page2 = sanitizeStructuredReport({
-      patient_name: "Someone Else",
-      report_date: "2024-03-05",
-      diagnoses: ["Anaemia", "Vitamin D deficiency"],
-      medications: ["Iron", "Vitamin D"],
-      lab_results: [{ name: "Hb", value: "10", unit: "g/dL", reference_range: "12-16", flag: "L" }],
-      doctor_notes: "Recheck in 6 weeks.",
-      raw_text: "page two",
-    });
-
-    const merged = mergeStructuredReports([page1, page2]);
-    expect(merged.patient_name).toBe("Asha Rao");
-    expect(merged.report_date).toBe("2024-03-05");
-    expect(merged.diagnoses).toEqual(["Anaemia", "Vitamin D deficiency"]);
-    expect(merged.medications).toEqual(["Iron", "Vitamin D"]);
-    expect(merged.lab_results).toHaveLength(1);
-    expect(merged.doctor_notes).toBe("Rest.\n\nRecheck in 6 weeks.");
-    expect(merged.raw_text).toBe("page one\n\npage two");
-  });
-
-  it("returns the empty report for no pages", () => {
-    expect(mergeStructuredReports([])).toEqual(defaultStructuredReport());
   });
 });
 

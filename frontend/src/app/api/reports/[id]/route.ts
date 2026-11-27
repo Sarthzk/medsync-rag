@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isErrorResponse, jsonError, requireUser } from "@/lib/server/auth";
-import { deleteReminders, removeObjects } from "@/lib/server/reports";
+import { deleteReminders, expireStaleReports, removeObjects } from "@/lib/server/reports";
 
 /** Processing status of one report; the browser polls this after an upload. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -8,6 +8,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (isErrorResponse(ctx)) return ctx;
   const { id } = await context.params;
 
+  await expireStaleReports(ctx.supabase);
   const { data, error } = await ctx.supabase
     .from("reports")
     .select("id, filename, status, error")
@@ -21,7 +22,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return NextResponse.json(data);
 }
 
-/** Deletes one report: stored file, row (chunks and lab results cascade) and linked medication reminders. */
+/** Deletes one report: stored file, then row (chunks and lab results cascade) and linked medication reminders. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const ctx = await requireUser(request);
   if (isErrorResponse(ctx)) return ctx;
@@ -39,12 +40,18 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   }
   if (!report) return jsonError(404, "Report not found.");
 
+  // File first: if it cannot be removed the row stays, so the user can retry instead of orphaning a medical file.
+  try {
+    await removeObjects(ctx.supabase, [report.storage_path]);
+  } catch (e) {
+    console.error("delete report file failed:", e);
+    return jsonError(500, "Could not delete the report.");
+  }
   const { error: delError } = await ctx.supabase.from("reports").delete().eq("id", id);
   if (delError) {
     console.error("delete report failed:", delError.message);
     return jsonError(500, "Could not delete the report.");
   }
-  await removeObjects(ctx.supabase, [report.storage_path]);
   const reminders = await deleteReminders(ctx.supabase, ctx.user.id, [report.filename]);
   return NextResponse.json({ deleted: report.filename, medication_reminders_cleaned: reminders });
 }

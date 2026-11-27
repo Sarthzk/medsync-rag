@@ -13,7 +13,7 @@ export const ragConfig = {
   faithfulnessDisabled: process.env.MEDSYNC_FAITHFULNESS_DISABLED === "true",
 } as const;
 
-/** Per-user daily limits (enforced by the consume_quota RPC). */
-export const DAILY_LIMITS = { chat: 100, ingest: 20 } as const;
+/** Per-user daily limits (enforced by the consume_quota RPC). Kept low: signup is open, so total spend is limit x accounts. */
+export const DAILY_LIMITS = { chat: 30, ingest: 5 } as const;
 
 export const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf"] as const;

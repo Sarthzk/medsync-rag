@@ -22,7 +22,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return NextResponse.json(data);
 }
 
-/** Deletes one report: stored file, then row (chunks and lab results cascade) and linked medication reminders. */
+/** Deletes one report: stored file, then row (chunks cascade) and linked medication reminders. */
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const ctx = await requireUser(request);
   if (isErrorResponse(ctx)) return ctx;

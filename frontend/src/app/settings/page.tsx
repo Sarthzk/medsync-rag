@@ -9,7 +9,6 @@ import type { User } from "@supabase/supabase-js";
 
 interface UserSettings {
   user_id: string;
-  ai_analysis_enabled: boolean;
   notifications_enabled: boolean;
 }
 
@@ -34,7 +33,6 @@ export default function SettingsPage() {
   
   const [settings, setSettings] = useState<UserSettings>({
     user_id: "",
-    ai_analysis_enabled: true,
     notifications_enabled: true,
   });
 
@@ -64,7 +62,6 @@ export default function SettingsPage() {
         if (data) {
           setSettings({
             user_id: user.id,
-            ai_analysis_enabled: data.ai_analysis_enabled ?? true,
             notifications_enabled: data.notifications_enabled ?? true,
           });
         } else {
@@ -98,7 +95,6 @@ export default function SettingsPage() {
         .upsert(
           {
             user_id: settings.user_id,
-            ai_analysis_enabled: settings.ai_analysis_enabled,
             notifications_enabled: newValue,
           },
           { onConflict: "user_id" }

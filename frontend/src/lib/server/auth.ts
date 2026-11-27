@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase-server";
 import { createClientForToken } from "./userClient";
 
-export type AuthedContext = { supabase: SupabaseClient; user: User };
+export type AuthedContext = { supabase: SupabaseClient; user: { id: string } };
 
 export const jsonError = (status: number, error: string, extra: Record<string, unknown> = {}) =>
   NextResponse.json({ error, ...extra }, { status });
@@ -18,8 +18,9 @@ export async function requireUser(request?: Request): Promise<AuthedContext | Ne
   // A bearer token makes every query run as that user; otherwise fall back to the session cookie.
   const supabase = bearer ? createClientForToken(bearer) : await createClient();
   try {
-    const { data, error } = await supabase.auth.getUser(bearer || undefined);
-    if (data.user) return { supabase, user: data.user };
+    // getClaims checks the token's signature locally instead of calling Supabase Auth on every request.
+    const { data, error } = await supabase.auth.getClaims(bearer || undefined);
+    if (data?.claims.sub) return { supabase, user: { id: data.claims.sub } };
     if (error && (error.name === "AuthRetryableFetchError" || (error.status ?? 0) >= 500)) {
       return jsonError(503, "Authentication service is unavailable. Please try again.");
     }

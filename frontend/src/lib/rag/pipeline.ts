@@ -27,7 +27,6 @@ export type ChatEvent =
 const historyBlock = (history: HistoryTurn[]) => `Conversation history:\n${historyToText(history) || "[none]"}\n\n`;
 
 async function classifyIntent(question: string, history: HistoryTurn[]): Promise<Intent> {
-  if (isPureGreeting(question)) return "CONVERSATIONAL";
   try {
     const raw = await complete({
       model: ragConfig.routerModel,
@@ -147,6 +146,12 @@ export async function* chatEvents(
 ): AsyncGenerator<ChatEvent> {
   if (!question.trim()) {
     yield { t: "Please ask a question." };
+    return;
+  }
+
+  // A bare greeting needs no classifier call and no retrieval prep.
+  if (isPureGreeting(question)) {
+    for await (const t of streamAnswer(conversationalPrompt(question, history), ragConfig.maxConversationalTokens)) yield { t };
     return;
   }
 

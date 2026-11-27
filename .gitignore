@@ -3,6 +3,7 @@ venv/
 __pycache__/
 *.py[cod]
 .env
+.mcp.json
 
 # --- Database & Local Storage (CRITICAL) ---
 medsync_db/

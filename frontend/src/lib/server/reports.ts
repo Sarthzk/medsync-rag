@@ -56,7 +56,7 @@ export async function deleteReminders(
   return data?.length ?? 0;
 }
 
-/** Deletes every stored file first, then every report row (chunks and lab results cascade) and linked reminder. */
+/** Deletes every stored file first, then every report row (chunks cascade) and linked reminder. */
 export async function deleteAllReports(supabase: SupabaseClient, userId: string) {
   const { data: reports, error } = await supabase
     .from("reports")
